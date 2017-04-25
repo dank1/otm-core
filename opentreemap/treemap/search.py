@@ -198,7 +198,20 @@ def _parse_query_dict(query_dict, mapping):
 
 
 def _parse_scalar_predicate(query, mapping):
-    qs = [_parse_scalar_predicate_pair(*kv, mapping=mapping)
+
+    _parse_dict_value = partial(_parse_dict_value_for_mapping, PREDICATE_TYPES)
+
+    def parse_scalar_predicate_pair(key, value, mapping):
+        model, search_key = _parse_predicate_key(key, mapping)
+
+        query = {search_key + k: v for (k, v)
+                 in _parse_dict_value(value).iteritems()} \
+            if isinstance(value, dict) \
+            else {search_key: value}
+
+        return FilterContext(basekey=model, **query)
+
+    qs = [parse_scalar_predicate_pair(*kv, mapping=mapping)
           for kv in query.iteritems()]
     return _apply_combinator('AND', qs)
 
@@ -212,6 +225,17 @@ def _parse_by_is_collection_udf(query_dict, mapping):
 
 
 def _parse_by_key_type(key, mapping):
+    '''
+    _parse_by_key_type(key, mapping)
+    returns dict with keys 'type', 'model', 'field', 'key'.
+
+    key is a string.
+    mapping should be similar to DEFAULT_MAPPING.
+
+    Collection UDF keys are returned as the dict 'type' value.
+
+    Scalar keys, UDF or regular, return '*' as the dict 'type' value.
+    '''
     model, field = _parse_predicate_key(key, mapping)
     typ = model if _is_udf(model) else '*'
     return {'type': typ, 'model': model, 'field': field, 'key': key}
@@ -223,30 +247,72 @@ def _unparse_scalars(scalars):
 
 
 def _parse_collections(by_type, mapping):
+    def parse_collection_subquery(identifier, field_parts, mapping):
+        # identifier looks like 'udf:<model type>:<udfd id>'
+        __, model, udfd_id = identifier.split(':', 2)
+
+        return FilterContext(
+            basekey=model, **{
+                mapping[model] + 'id__in': UserDefinedCollectionValue.objects
+                .filter(_parse_udf_collection(udfd_id, field_parts))
+                .values_list('model_id', flat=True)})
+
     return _apply_combinator(
-        'AND', [_parse_collection_subquery(identifier, field_parts, mapping)
+        'AND', [parse_collection_subquery(identifier, field_parts, mapping)
                 for identifier, field_parts in by_type.items()])
 
 
-def _parse_collection_subquery(identifier, field_parts, mapping):
-    # identifier looks like 'udf:<model type>:<udfd id>'
-    __, model, udfd_id = identifier.split(':', 2)
-
-    return FilterContext(
-        basekey=model, **{
-            mapping[model] + 'id__in': UserDefinedCollectionValue.objects
-            .filter(_parse_udf_collection(udfd_id, field_parts))
-            .values_list('model_id', flat=True)})
-
-
 def _parse_udf_collection(udfd_id, query_parts):
+
+    parse_udf_dict_value = partial(_parse_dict_value_for_mapping,
+                                   COLLECTION_HSTORE_PREDICATE_TYPES)
+
+    def parse_collection_udf_dict(key, value):
+        __, field = key.split('.')
+        if isinstance(value, dict):
+            preds = parse_udf_dict_value(value, field)
+            query = {'data' + k: v for (k, v) in preds.iteritems()}
+        else:
+            query = {'data__contains': {field: value}}
+        return query
+
     return _apply_combinator(
         'AND', list(chain([Q(field_definition=udfd_id)],
-                          [Q(**_parse_udf_dict(part['key'], part['value']))
+                          [Q(**parse_collection_udf_dict(
+                              part['key'], part['value']))
                            for part in query_parts])))
 
 
+# TODO: convert scalar UDF search key as follows:
+# 'plot.udf:Zoning' -> ('plot', 'udfs__Zoning')
+# 'tree.udf:Plant Date' -> ('tree', 'tree__udfs__Plant Date')
 def _parse_predicate_key(key, mapping):
+    '''
+    _parse_predicate_key(key, mapping)
+    returns tuple(model_name, field_name)
+
+    key is a string.
+    mapping is a dict and should be similar to DEFAULT_MAPPING.
+
+    collection UDF search keys look like 'udf:plot:<udfd>.action'
+    in which case, `parse_predicate_key` returns ('udf:plot:<udfd>', 'id').
+
+    If the collection key looks like 'udf:tree:<udfd>.action',
+    `parse_predicate_key` returns ('udf:tree:<udfd>', 'tree__id'),
+    where the 'tree__' prefix on the 'id' field comes from the mapping.
+
+    A scalar UDF search key looks like
+    'plot.udf:Zoning' or 'tree.udf:Plant Date',
+    in which case `parse_predicate_key` returns
+    ('plot', 'udf:Zoning') or ('tree', 'tree__udf:Plant Date') respectively,
+    where the 'tree__' prefix on the 'Plant Date' field comes from the mapping.
+
+    A regular field looks like a UDF search key, minus the 'udf:' prefix.
+
+    Raises `ParseException` if the key does not contain exactly one dot.
+    Raises `ModelParseException` if the model part of the key is not found
+    in the mapping argument.
+    '''
     format_string = 'Keys must be in the form of "model.field", not "%s"'
     model, field = dotted_split(key, 2,
                                 failure_format_string=format_string,
@@ -416,7 +482,7 @@ PREDICATE_TYPES = {
 }
 
 
-HSTORE_PREDICATE_TYPES = {
+COLLECTION_HSTORE_PREDICATE_TYPES = {
     'MIN': {
         'combines_with': {'MAX'},
         'predicate_builder': _parse_min_max_value_fn('__gt'),
@@ -442,11 +508,17 @@ HSTORE_PREDICATE_TYPES = {
 
 def _parse_dict_value_for_mapping(mapping, valuesdict, field=None):
     """
-    Loops over the keys provided and returns predicate pairs
-    if all the keys validate.
+    _parse_dict_value_for_mapping(mapping, valuesdict, field=None):
 
-    Supported keys are:
-    'MIN', 'MAX', 'IN', 'IS', 'WITHIN_RADIUS', 'IN_BOUNDARY'
+    `mapping` is a dict mapping predicate types to rules.
+    `valuesdict` maps predicate types to the values to search for.
+    [`field`] designates the UDF key in which to search for the value,
+    for a scalar UDF.
+
+    Returns predicate pairs, if all the keys validate.
+
+    Supported `mapping` and `valuesdict` keys are:
+    'MIN', 'MAX', 'IN', 'IS', 'ISNULL', 'LIKE', 'WITHIN_RADIUS', 'IN_BOUNDARY'
 
     All predicates except MIN/MAX are mutually exclusive
     """
@@ -470,35 +542,6 @@ def _parse_dict_value_for_mapping(mapping, valuesdict, field=None):
                 params.update(param_pair)
 
     return params
-
-
-_parse_dict_value = partial(_parse_dict_value_for_mapping, PREDICATE_TYPES)
-_parse_udf_dict_value = partial(_parse_dict_value_for_mapping,
-                                HSTORE_PREDICATE_TYPES)
-
-
-def _parse_scalar_predicate_pair(key, value, mapping):
-    try:
-        model, search_key = _parse_predicate_key(key, mapping)
-    except ModelParseException:
-        raise
-
-    query = {search_key + k: v for (k, v)
-             in _parse_dict_value(value).iteritems()} \
-        if isinstance(value, dict) \
-        else {search_key: value}
-
-    return FilterContext(basekey=model, **query)
-
-
-def _parse_udf_dict(key, value):
-    __, field = key.split('.')
-    if isinstance(value, dict):
-        preds = _parse_udf_dict_value(value, field)
-        query = {'data' + k: v for (k, v) in preds.iteritems()}
-    else:
-        query = {'data__contains': {field: value}}
-    return query
 
 
 def _apply_combinator(combinator, predicates):

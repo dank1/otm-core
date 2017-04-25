@@ -955,7 +955,7 @@ class Authorizable(UserTrackable):
             for field in self._updated_fields():
                 if field not in self._get_writable_perms_set(user):
                     raise AuthorizeException("Can't edit field %s on %s" %
-                                            (field, self._model_name))
+                                             (field, self._model_name))
 
         # If `WRITE_WITH_AUDIT` (i.e. pending write) is resurrected,
         # this test will prevent `_PendingAuditable` from getting called
@@ -1206,8 +1206,7 @@ class _PendingAuditable(Auditable):
 
         is_insert = self.pk is None
 
-        if ((self.user_can_create(user)
-             or not is_insert or auth_bypass)):
+        if ((self.user_can_create(user) or not is_insert or auth_bypass)):
             # Auditable will make the audits for us (including pending audits)
             return super(_PendingAuditable, self).save_with_user(
                 user, updates=updates, *args, **kwargs)
@@ -1382,8 +1381,8 @@ class Audit(models.Model):
                     datatype = udf_def.datatype_by_field[field_name]
             else:
                 udf_def = next((udfd for udfd in udfds
-                                if udfd.name == field_name
-                                and udfd.model_type == self.model), None)
+                                if udfd.name == field_name and
+                                udfd.model_type == self.model), None)
                 if udf_def is not None:
                     datatype = udf_def.datatype_dict
             if udf_def is not None:

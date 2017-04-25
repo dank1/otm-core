@@ -3,27 +3,23 @@ from __future__ import print_function
 from __future__ import unicode_literals
 from __future__ import division
 
+from traceback import extract_stack, format_list
 import json
 import copy
 import re
 from datetime import date, datetime
 
-from django.core.exceptions import ValidationError, FieldError
+from django.core.exceptions import ValidationError
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.gis.db import models
 from django.db import transaction
 from django.db.models import Q
 from django.db.models.fields.subclassing import Creator
 from django.db.models.base import ModelBase
-from django.db.models.lookups import Lookup
-from django.db.models.sql.constants import ORDER_PATTERN
 from django.db.models.signals import post_save, post_delete
 
-from django.db.models.sql.query import Query
-
 from django_hstore.fields import DictionaryField, HStoreDict
-from django_hstore.managers import HStoreManager, HStoreGeoManager
-from django_hstore.query import HStoreGeoQuerySet
+from django_hstore.managers import HStoreManager
 
 from treemap.instance import Instance
 from treemap.audit import (UserTrackable, Audit, UserTrackingException,
@@ -56,6 +52,13 @@ from treemap.decorators import classproperty
 # * '"' makes the ORM error out when building 'AS' clauses and wrapping
 #   them with quotes.
 _UDF_NAME_REGEX = re.compile(r'^[^_"%.]+$')
+
+
+# TODO: Remove instrumentation
+def print_stack(trace):
+    stack = format_list([frame for frame in trace
+                         if 'treemap' in frame[0]])
+    print('{}\n'.format('\n'.join(stack)))
 
 
 def safe_get_udf_model_class(model_string):
@@ -932,6 +935,8 @@ class UDFDictionary(HStoreDict):
 
         self._fields = None
         self._collection_fields = None
+        print('UDFDictionary init({})\n'.format(field))
+        print_stack(extract_stack())
 
     @property
     def collection_data_loaded(self):
@@ -1036,6 +1041,10 @@ class UDFDescriptor(Creator):
 
 
 class UDFField(DictionaryField):
+    def __init__(self, *args, **kwargs):
+        super(UDFField, self).__init__(*args, **kwargs)
+        print('UDFField __init__')
+
     # Overridden to convert HStoreDict values to UDFDictionary values
     def get_default(self):
         hstore_dict = super(UDFField, self).get_default()
@@ -1062,8 +1071,14 @@ class _UDFProxy(UDFField):
         super(_UDFProxy, self).__init__(*args, **kwargs)
         self.column = ('udf', name)
         self.model = None
+        # TODO: remove instrumentation
+        print('_UDFProxy({})\n'.format(name))
+        print_stack(extract_stack())
 
     def to_python(self, value):
+        # TODO: remove instrumentation
+        print('_UDFProxy.to_python({})"\n'.format(value))
+        print_stack(extract_stack())
         return value
 
 
@@ -1172,6 +1187,40 @@ class UDFModel(UserTrackable, models.Model):
                             .filter(current_value__in=pks)\
                             .distinct('model_id')\
                             .values_list('model_id', flat=True)
+
+    @staticmethod
+    def transform_filter_arg(filter_arg):
+        """
+        transform_filter_arg takes 'udf:' style query keywords
+        and transforms them into HStoreField friendly query keywords.
+
+        For example,
+        'udf:Zoning' becomes 'udfs__Zoning',
+        which HStoreField transforms into SQL similar to
+        ("treemap_plot"."udfs"->'Plant Date')::timestamp =
+            '2000-01-02'::timestamp
+
+        'tree__udf:Plant Date__gt' becomes 'udfs__Plant Date__gt'
+        NOTE: the regex transforms this into
+        (model = 'tree__', udf_name = 'Plant Date', lookup = '__gt')
+        but what are we supposed to do with `model`?
+
+        """
+        match = UDF_LOOKUP_PATTERN.match(filter_arg)
+
+        if match:
+            model, udf_name, lookup = match.groups()
+
+            # TODO: remove instrumentation
+            print('build_filter: filter_arg="{}"\n'.format(filter_arg))
+            print_stack(extract_stack())
+
+            if model is None:
+                model = ''
+
+            arg = model + 'udfs__' + udf_name + lookup
+
+        return arg
 
     def apply_change(self, key, val):
         if key.startswith('udf:'):
@@ -1379,178 +1428,4 @@ class UDFModel(UserTrackable, models.Model):
             raise ValidationError(errors)
 
 
-def quotesingle(string):
-    "Quote a string with ' characters, replacing them with ''"
-    return string.replace("'", "''")
-
-
 UDF_LOOKUP_PATTERN = re.compile(r'(.*?__)?udf\:(.+?)(__[a-zA-z]+)?$')
-UDF_ORDER_PATTERN = re.compile(r'(-?)([a-zA-Z]+)\.udf\:(.+)$')
-
-
-class UDFBaseContains(Lookup):
-    def as_postgresql(self, compiler, connection):
-        lhs, lhs_params = self.process_lhs(compiler, connection)
-        rhs, rhs_params = self.process_rhs(compiler, connection)
-
-        op = 'LIKE' if self.lookup_name == 'udf_contains' else 'ILIKE'
-
-        if len(rhs_params) == 1 and isinstance(rhs_params[0], dict):
-            param = rhs_params[0]
-            param_keys = list(param.keys())
-            conditions = []
-
-            # Need to wrap every value in percents, since Django isn't
-            # doing it for us
-            values = ['%' + val + '%' for val in param.values()]
-
-            for key in param_keys:
-                conditions.append(
-                    '%s->\'%s\' %s %%s' % (lhs, quotesingle(key), op))
-
-            return (" AND ".join(conditions), values)
-
-        raise ValueError('invalid value')
-
-
-@UDFField.register_lookup
-class UDFContains(UDFBaseContains):
-    lookup_name = 'udf_contains'
-
-
-@UDFField.register_lookup
-class UDFIContains(UDFBaseContains):
-    lookup_name = 'udf_icontains'
-
-
-class UDFQuery(Query):
-    """
-    UDF Query encapsulates query compilation changes.
-
-    This class allows us to write the where clauses for a
-    query that looks something like:
-
-    Plot.objects.filter(**{'udf:Plant Date': datetime(2000,1,2)})
-
-    And transforms it into something like:
-    Plot.objects.filter(udfs={'Plant Date': datetime(2000,1,2)})
-
-    This will allow django-hstore to transform it into SQL similar to:
-
-    ("treemap_plot"."udfs"->'Plant Date')::timestamp = '2000-01-02'::timestamp
-
-    Insert text 'bout contains/icontains
-
-    TODO: Is this true?
-    NOTE: This class *must* inherit from Query, not HstoreQuery
-          HStoreQuery will overwrite our WhereNode with it's own
-    """
-    def build_filter(self, filter_expr, *args, **kwargs):
-        arg, value = filter_expr
-        match = UDF_LOOKUP_PATTERN.match(arg)
-
-        if match:
-            model, udf_name, lookup = match.groups()
-
-            if model is None:
-                model = ''
-
-            # For contains searches on UDFs we need to switch to our custom
-            # lookup class, because django-hstore defines contains as subset
-            #
-            # For exact searches on scalar UDFs, we actually want contains,
-            # because we don't care about other UDF values
-            if lookup == '__contains':
-                lookup = '__udf_contains'
-            elif lookup == '__icontains':
-                lookup = '__udf_icontains'
-            elif lookup is None or lookup == '__exact':
-                lookup = '__contains'
-
-            arg = model + 'udfs' + lookup
-            wrapped_param = {}
-            wrapped_param[udf_name] = value
-
-            filter_expr = (arg, wrapped_param)
-        return super(UDFQuery, self).build_filter(filter_expr, *args, **kwargs)
-
-    def process_as_udf(self, field):
-        """
-        Determine if a given field is a UDF definition for
-        ordering.
-
-        If not, return False.
-
-        A udf definition must match the UDF_ORDER_PATTERN regular
-        expression. Generally looks something like:
-
-        `Plot.udf:Nickname`
-        `-Tree.udf:Secret ID``
-
-        The return value will work with normal quoting rules to
-        generate the proper SQL
-
-        WARNING: Since we don't know the datatype of a sort field
-        we cannot cast it. Dates will sort correctly since dates are
-        lexicographically ordered. Numbers will not.
-        """
-        udf = UDF_ORDER_PATTERN.match(field)
-
-        if udf:
-            sign, model, udffield = udf.groups()
-
-            sign = sign or ''
-
-            model_class = safe_get_udf_model_class(model)
-            table_name = model_class._meta.db_table
-
-            accessor = ("%s%s.udfs->'%s'" %
-                        (sign, table_name, quotesingle(udffield)))
-
-            return accessor
-        else:
-            return False
-
-    def add_ordering(self, *ordering):
-        """
-        This method was copied and modified from django core. In
-        particular, each field should be checked against UDF_ORDER_PATTERN
-        via 'process_as_udf'
-        """
-        fields = []
-        errors = []
-        for item in ordering:
-            udf = self.process_as_udf(item)
-            if udf:
-                fields.append(udf)
-            elif ORDER_PATTERN.match(item):
-                fields.append(item)
-            else:
-                errors.append(item)
-        if errors:
-            raise FieldError('Invalid order_by arguments: %s' % errors)
-        if ordering:
-            self.order_by.extend(fields)
-        else:
-            self.default_ordering = False
-
-
-class UDFQuerySet(HStoreGeoQuerySet):
-    """
-    A query set that supports udf-based filter queries
-
-    This class exists mainly to provide an injection point
-    for UDFQuery
-    """
-    def __init__(self, model=None, query=None, using=None, hints=None):
-        super(UDFQuerySet, self).__init__(
-            model=model, query=query, using=using, hints=hints)
-        self.query = query or UDFQuery(model)
-
-
-class GeoHStoreUDFManager(HStoreGeoManager):
-    """
-    Merges the normal geo manager with the hstore manager backend
-    """
-    def get_queryset(self):
-        return UDFQuerySet(self.model, using=self._db)
