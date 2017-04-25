@@ -5,10 +5,11 @@ from __future__ import division
 
 from django.contrib.gis.db import models
 from django.utils.translation import ugettext_lazy as _
+from django_hstore.managers import HStoreGeoManager
 
 from stormwater.benefits import PolygonalBasinBenefitCalculator
 from treemap.decorators import classproperty
-from treemap.models import MapFeature, GeoHStoreUDFManager, ValidationMixin
+from treemap.models import MapFeature, ValidationMixin
 from treemap.ecobenefits import CountOnlyBenefitCalculator
 
 
@@ -18,7 +19,7 @@ class PolygonalMapFeature(MapFeature):
 
     polygon = models.MultiPolygonField(srid=3857)
 
-    objects = GeoHStoreUDFManager()
+    objects = HStoreGeoManager()
 
     @classproperty
     def always_writable(cls):
@@ -64,7 +65,7 @@ class PolygonalMapFeature(MapFeature):
 
 
 class Bioswale(PolygonalMapFeature, ValidationMixin):
-    objects = GeoHStoreUDFManager()
+    objects = HStoreGeoManager()
     drainage_area = models.FloatField(
         null=True,
         blank=True,
@@ -126,7 +127,7 @@ class Bioswale(PolygonalMapFeature, ValidationMixin):
 
 
 class RainGarden(PolygonalMapFeature, ValidationMixin):
-    objects = GeoHStoreUDFManager()
+    objects = HStoreGeoManager()
     drainage_area = models.FloatField(
         null=True,
         blank=True,
@@ -188,7 +189,7 @@ class RainGarden(PolygonalMapFeature, ValidationMixin):
 
 
 class RainBarrel(MapFeature):
-    objects = GeoHStoreUDFManager()
+    objects = HStoreGeoManager()
     capacity = models.FloatField(
         verbose_name=_("Capacity"),
         error_messages={'invalid': _("Please enter a number.")})
