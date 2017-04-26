@@ -18,8 +18,8 @@ from django.db.models.fields.subclassing import Creator
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save, post_delete
 
+from django.contrib.postgres.fields import HStoreField
 from django_hstore.fields import DictionaryField, HStoreDict
-from django_hstore.managers import HStoreManager
 
 from treemap.instance import Instance
 from treemap.audit import (UserTrackable, Audit, UserTrackingException,
@@ -58,7 +58,7 @@ _UDF_NAME_REGEX = re.compile(r'^[^_"%.]+$')
 def print_stack(trace):
     stack = format_list([frame for frame in trace
                          if 'treemap' in frame[0]])
-    print('{}\n'.format('\n'.join(stack)))
+    print('{}\n'.format('\n'.join(stack[-6:-1])))
 
 
 def safe_get_udf_model_class(model_string):
@@ -97,9 +97,7 @@ class UserDefinedCollectionValue(UserTrackable, models.Model):
     """
     field_definition = models.ForeignKey('UserDefinedFieldDefinition')
     model_id = models.IntegerField()
-    data = DictionaryField()
-
-    objects = HStoreManager()
+    data = HStoreField()
 
     def __unicode__(self):
         return repr(self.data)
@@ -120,8 +118,10 @@ class UserDefinedCollectionValue(UserTrackable, models.Model):
 
     def validate_foreign_keys_exist(self):
         """
+        validate_foreign_keys_exist(self)
+
         This is used to check if a given foreign key exists as part of
-        the audit system. However, this is no foreign key coupling to
+        the audit system. However, this has no foreign key coupling to
         other auditable/pending models, so we can skip this validation
         step
         """
@@ -1122,7 +1122,8 @@ class UDFModel(UserTrackable, models.Model):
 
     def __init__(self, *args, **kwargs):
         super(UDFModel, self).__init__(*args, **kwargs)
-        # Collection UDF audits are handled by the UDFCollectionValue class
+        # Collection UDF audits are handled by the
+        # UserDefinedCollectionValue class
         self._collection_field_names = {udfd.canonical_name
                                         for udfd in self.collection_udfs}
         # This is the whole reason for keeping _do_not_track
