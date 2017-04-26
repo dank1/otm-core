@@ -24,7 +24,6 @@ from django.utils.translation import ugettext_lazy as _
 from django.contrib.auth.models import (UserManager, AbstractBaseUser,
                                         PermissionsMixin)
 from django.template.loader import get_template
-from django_hstore.managers import HStoreGeoManager
 
 from treemap.species.codes import ITREE_REGIONS, get_itree_code
 from treemap.audit import Auditable, Role, Dictable, Audit, PendingAuditable
@@ -470,7 +469,7 @@ class Species(PendingAuditable, models.Model):
     updated_at = models.DateTimeField(  # TODO: remove null=True
         null=True, auto_now=True, editable=False, db_index=True)
 
-    objects = HStoreGeoManager()
+    objects = models.GeoManager()
 
     @property
     def display_name(self):
@@ -588,7 +587,7 @@ class MapFeature(Convertible, UDFModel, PendingAuditable):
     updated_by = models.ForeignKey(User, null=True, blank=True,
                                    verbose_name=_("Last Updated By"))
 
-    objects = HStoreGeoManager()
+    objects = models.GeoManager()
 
     # subclass responsibilities
     area_field_name = None
@@ -915,7 +914,7 @@ class Plot(MapFeature, ValidationMixin):
     owner_orig_id = models.CharField(max_length=255, null=True, blank=True,
                                      verbose_name=_("Custom ID"))
 
-    objects = HStoreGeoManager()
+    objects = models.GeoManager()
     is_editable = True
 
     _terminology = {'singular': _('Planting Site'),
@@ -1039,7 +1038,7 @@ class Tree(Convertible, UDFModel, PendingAuditable, ValidationMixin):
 
     users_can_delete_own_creations = True
 
-    objects = HStoreGeoManager()
+    objects = models.GeoManager()
 
     _stewardship_choices = ['Watered',
                             'Pruned',
