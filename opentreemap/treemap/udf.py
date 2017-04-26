@@ -1,4 +1,44 @@
 # -*- coding: utf-8 -*-
+
+'''
+treemap.udf
+
+Entry points:
+- `UDFModel`, a base class for models that need user defined fields
+- `UserDefinedFieldDefinition`, defines the name, data type, and model type
+  for a user defined field, for a given treemap instance, as a
+  scalar or a collection
+- `UserDefinedCollectionValue`, an HStore collection value for a
+  specific `UserDefinedFieldDefinition` on a specific model instance
+
+Guts (tl;dr):
+
+`UDFModel` provides a model with a `udfs` field that corresponds to
+a `udfs` column in the db table for the model.
+
+`udfs` is a gateway to both scalar and collection custom fields.
+
+If we only had scalar custom fields, `udfs` could be a
+`django.contrib.postgres.fields.HStoreField`, but collections are too
+complicated to store in the `udfs` HStore.
+
+During model instance initialization, django replaces `HStoreField` fields
+with ordinary `dict` instances, populated with the HStore content
+from the `udfs` column.
+
+`udfs` can't be an ordinary `dict` instance because it has to also
+act as a gateway to collection custom fields,
+so we subclass `HStoreField` as `UDFField` and perform magic to
+head off the replacement with a `dict` to instead replace with a
+`UDFDictionary` that knows how to handle collections.
+
+The `UDFField` does this by supplying a `contribute_to_class` method,
+which acts as `setattr` on the model class to tell it to replace
+the `UDFField` with a `UDFDescriptor`, which has `__get__` and `__set__`
+which substitute a `UDFDictionary` based on the `dict` that
+`HStoreField` would have supplied, with the additional collection feature.
+'''
+
 from __future__ import print_function
 from __future__ import unicode_literals
 from __future__ import division
@@ -19,7 +59,6 @@ from django.db.models.base import ModelBase
 from django.db.models.signals import post_save, post_delete
 
 from django.contrib.postgres.fields import HStoreField
-from django_hstore.fields import DictionaryField, HStoreDict
 
 from treemap.instance import Instance
 from treemap.audit import (UserTrackable, Audit, UserTrackingException,
@@ -58,7 +97,7 @@ _UDF_NAME_REGEX = re.compile(r'^[^_"%.]+$')
 def print_stack(trace):
     stack = format_list([frame for frame in trace
                          if 'treemap' in frame[0]])
-    print('{}\n'.format('\n'.join(stack[-6:-1])))
+    print('{}\n'.format('\n'.join(stack[:-1])))
 
 
 def safe_get_udf_model_class(model_string):
@@ -927,16 +966,20 @@ post_save.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 post_delete.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 
 
-class UDFDictionary(HStoreDict):
+class UDFDictionary(dict):
 
     def __init__(self, value, field, obj=None, *args, **kwargs):
-        super(UDFDictionary, self).__init__(value, field, *args, **kwargs)
+        super(UDFDictionary, self).__init__(value)
         self.instance = obj
 
         self._fields = None
         self._collection_fields = None
-        print('UDFDictionary init({})\n'.format(field))
-        print_stack(extract_stack())
+
+        if not obj:
+            # TODO: remove instrumentation
+            print('UDFDictionary.__init__({}, {}, {})\n'.format(
+                value, field, type(obj)))
+            print_stack(extract_stack())
 
     @property
     def collection_data_loaded(self):
@@ -1022,10 +1065,8 @@ class UDFDescriptor(Creator):
             return None
         # UDFDictionary needs a reference to the model instance to lookup
         # collection UDFs
-        udf_dict = obj.__dict__[self.field.name]
-        # Workaround for test failure on some dev machines
-        if udf_dict == '':
-            udf_dict = UDFDictionary({}, self.field, obj)
+        udf_dict = obj.__dict__[self.field.name] or \
+            UDFDictionary({}, self.field, obj)
         udf_dict.instance = obj
 
         return udf_dict
@@ -1033,34 +1074,33 @@ class UDFDescriptor(Creator):
     def __set__(self, obj, value):
         value = self.field.to_python(value)
         if isinstance(value, dict):
-            value = UDFDictionary(
-                value=value, field=self.field, instance=obj
-            )
+            value = UDFDictionary(value=value, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`
         obj.__dict__[self.field.name] = value
 
 
-class UDFField(DictionaryField):
-    def __init__(self, *args, **kwargs):
-        super(UDFField, self).__init__(*args, **kwargs)
-        print('UDFField __init__')
+class UDFField(HStoreField):
+    '''
+    UDFField(HStoreField)
 
-    # Overridden to convert HStoreDict values to UDFDictionary values
+
+    `django.contrib.postgres.fields.HStoreField`
+    has magic that replaces it with an ordinary `dict`,
+    probably in its `contribute_to_class`.
+    '''
+    # Overridden to convert dict values to UDFDictionary values
     def get_default(self):
         hstore_dict = super(UDFField, self).get_default()
-        if isinstance(hstore_dict, HStoreDict):
-            return UDFDictionary(hstore_dict, self)
-        else:
-            return hstore_dict
+        return self.get_prep_value(hstore_dict)
 
-    # Overridden to convert HStoreDict values to UDFDictionary values
+    # Overridden to convert dict values to UDFDictionary values
     def get_prep_value(self, value):
         if isinstance(value, dict) and not isinstance(value, UDFDictionary):
             return UDFDictionary(value, self)
         else:
             return value
 
-    # Overridden to convert HStoreDict values to UDFDictionary values
+    # Overridden to convert model-instance udfs field to UDFDescriptor
     def contribute_to_class(self, cls, name):
         super(UDFField, self).contribute_to_class(cls, name)
         setattr(cls, self.name, UDFDescriptor(self))
@@ -1213,7 +1253,7 @@ class UDFModel(UserTrackable, models.Model):
             model, udf_name, lookup = match.groups()
 
             # TODO: remove instrumentation
-            print('build_filter: filter_arg="{}"\n'.format(filter_arg))
+            print('transform_filter_arg: filter_arg="{}"\n'.format(filter_arg))
             print_stack(extract_stack())
 
             if model is None:
