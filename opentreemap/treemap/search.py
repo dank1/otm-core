@@ -197,13 +197,13 @@ def _parse_query_dict(query_dict, mapping):
 
 def _parse_scalar_predicate(query, mapping):
 
-    _parse_dict_value = partial(_parse_dict_value_for_mapping, PREDICATE_TYPES)
+    parse_dict_value = partial(_parse_dict_value_for_mapping, PREDICATE_TYPES)
 
     def parse_scalar_predicate_pair(key, value, mapping):
         model, prefix, search_key = _parse_predicate_key(key, mapping)
 
         query = {_lookup_key(prefix, search_key, k): v for (k, v)
-                 in _parse_dict_value(value).iteritems()} \
+                 in parse_dict_value(value).iteritems()} \
             if isinstance(value, dict) \
             else {search_key: value}
 
