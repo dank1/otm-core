@@ -216,8 +216,6 @@ def _parse_scalar_predicate(query, mapping):
 
 def _parse_by_is_collection_udf(query_dict, mapping):
     '''
-    _parse_by_is_collection_udf(query_dict, mapping)
-
     given a `dict` query_dict mapping keys to individual predicates,
     and a mapping similar to DEFAULT_MAPPING,
 
@@ -244,11 +242,8 @@ def _parse_by_is_collection_udf(query_dict, mapping):
 
 def _parse_by_key_type(key, mapping):
     '''
-    _parse_by_key_type(key, mapping)
-    returns dict with keys 'type', 'model', 'field', 'key'.
-
-    key is a string.
-    mapping should be similar to DEFAULT_MAPPING.
+    given a string key, and a mapping similar to DEFAULT_MAPPING,
+    return dict with keys 'type', 'model', 'field', 'key'.
 
     Collection UDF keys are returned as the dict 'type' value.
 
@@ -267,8 +262,6 @@ def _unparse_scalars(scalars):
 
 def _parse_collections(by_type, mapping):
     '''
-    _parse_collections(by_type, mapping)
-
     given a `dict` keyed by collection identifiers,
     and a mapping similar to DEFAULT_MAPPING,
 
@@ -296,8 +289,6 @@ def _parse_collections(by_type, mapping):
 
 def _parse_udf_collection(udfd_id, query_parts):
     '''
-    _parse_udf_collection(udfd_id, query_parts)
-
     given a `UserDefinedFieldDefinition` id, and a list of `query_parts`,
 
     return a `FilterContext` that ANDs together `Q` queries intended
@@ -338,9 +329,6 @@ def _lookup_key(prefix, field, lookup_name=''):
     return '{}{}{}'.format(prefix, field, lookup_name)
 
 
-# TODO: convert scalar UDF search key as follows:
-# 'plot.udf:Zoning' -> ('plot', 'udfs__Zoning')
-# 'tree.udf:Plant Date' -> ('tree', 'tree__udfs__Plant Date')
 def _parse_predicate_key(key, mapping):
     '''
     given a key and a mapping,
@@ -461,11 +449,6 @@ def _simple_pred(key):
 
 
 def _hstore_exact_predicate(val):
-    """
-    django_hstore builds different sql for the __contains predicate
-    depending on whether the input value is a list or a single item
-    so this works for both 'IN' and 'IS'
-    """
     return {'__exact': val}
 
 # a predicate_builder takes a value for the
