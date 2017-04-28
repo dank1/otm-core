@@ -78,9 +78,12 @@ from treemap.lib.dates import (parse_date_string_with_or_without_time,
 from treemap.util import (safe_get_model_class, to_object_name,
                           get_pk_from_collection_audit_name,
                           get_name_from_canonical_name,
-                          make_udf_name_from_key)
+                          make_udf_lookup_from_key, make_udf_name_from_key)
 
 from treemap.decorators import classproperty
+
+
+UDF_RESERVED_NAMES = set(HStoreField.class_lookups.keys())
 
 
 class UDFInitializationException (Exception):
@@ -404,6 +407,11 @@ class UserDefinedFieldDefinition(models.Model):
                 {'datatype': [_("Choice '%(choice)s' not found") % {
                     'choice': old_choice_value}]})
 
+        if old_choice_value == new_choice_value:
+            raise ValidationError(
+                {'datatype': [_('Choice "%(choice)s" did not change') % {
+                    'choice': old_choice_value}]})
+
         choices = datatype['choices']
         if new_choice_value:
             choices = [c if c != old_choice_value else new_choice_value
@@ -423,17 +431,17 @@ class UserDefinedFieldDefinition(models.Model):
         Model = safe_get_udf_model_class(self.model_type)
 
         if self.datatype_dict['type'] == 'choice':
-            for model in Model.objects\
-                              .filter(**{'instance': self.instance,
-                                         self.canonical_name:
-                                         old_choice_value}):
+            udf_filter = {'instance': self.instance,
+                          self.lookup_name: old_choice_value}
+            models = Model.objects.filter(**udf_filter)
+
+            for model in models:
                 model.udfs[self.name] = new_choice_value
                 model.save_base()
 
         else:  # multichoice
             udf_filter = {'instance': self.instance,
-                          # grab anything with that key
-                          'udfs__has_key': self.name}
+                          self.lookup_name + '__contains': old_choice_value}
             models = Model.objects.filter(**udf_filter)
 
             for model in models:
@@ -538,6 +546,9 @@ class UserDefinedFieldDefinition(models.Model):
                 raise ValidationError({
                     'name': [_('Name is required for collection fields')]})
 
+            if new_choice_value == '':
+                new_choice_value = None
+
             datatypes = {info['name']: info for info in datatype}
             datatype = self._validate_and_update_choice(
                 datatypes[name], old_choice_value, new_choice_value)
@@ -549,23 +560,28 @@ class UserDefinedFieldDefinition(models.Model):
             vals = UserDefinedCollectionValue\
                 .objects\
                 .filter(field_definition=self)\
-                .extra(where=["data ? %s AND data->%s = %s"],
-                       params=[name, name, old_choice_value])
+                .filter(**{'data__' + name: old_choice_value})
 
+            # In the past, only the field named `name` was removed
+            # from each of the vals.
+            #
+            # That left behind vals with insufficient fields to be useful,
+            # such as Stewardship records with a Date and no Action.
+            #
+            # The new policy is to delete the vals outright.
             if new_choice_value is None:
-                vals.hremove('data', name)
+                vals.delete()
+
             else:
-                vals.hupdate('data', {name: new_choice_value})
+                # There doesn't appear to be any way to bulk update these
+                # without dropping into raw SQL.
+                for val in vals:
+                    val.data[name] = new_choice_value
+                    val.save_with_user(None)
 
             audits = Audit.objects.filter(
                 model=self.collection_audit_name,
                 field=make_udf_name_from_key(name))
-
-            # If the string is empty we want to delete the audits
-            # _update_choices_on_audits only does nf new_choice_value
-            # is none
-            if new_choice_value == '':
-                new_choice_value = None
 
             self._update_choices_on_audits(
                 audits, old_choice_value, new_choice_value)
@@ -588,12 +604,12 @@ class UserDefinedFieldDefinition(models.Model):
 
         model_class = safe_get_udf_model_class(model_type)
 
-        field_names = [field.name for field in model_class._meta.fields]
+        field_names = {field.name for field in model_class._meta.fields}
 
-        if self.name in field_names:
+        if self.name in field_names | UDF_RESERVED_NAMES:
             raise ValidationError(
                 {'name': [_('Cannot use fields that already '
-                            'exist on the model')]})
+                            'exist on the model or is reserved')]})
         if not self.name:
             raise ValidationError(
                 {'name': [_('Name cannot be blank')]})
@@ -949,6 +965,10 @@ class UserDefinedFieldDefinition(models.Model):
             raise ValidationError(errors)
 
     @property
+    def lookup_name(self):
+        return make_udf_lookup_from_key(self.name)
+
+    @property
     def canonical_name(self):
         return make_udf_name_from_key(self.name)
 
@@ -995,12 +1015,16 @@ class UDFDictionary(dict):
     def _base_collection_fields(self, clean):
 
         if self._collection_fields is None:
-            self._collection_fields = {}
-            udfs_on_model = self.instance.get_user_defined_fields()
+            collections_on_model = [
+                udfd for udfd in self.instance.get_user_defined_fields()
+                if udfd.iscollection]
+
+            self._collection_fields = {
+                udfd.name: [] for udfd in collections_on_model}
 
             values = UserDefinedCollectionValue.objects.filter(
                 model_id=self.instance.pk,
-                field_definition__in=udfs_on_model)
+                field_definition__in=collections_on_model)
 
             for value in values:
                 if clean:
@@ -1010,9 +1034,6 @@ class UDFDictionary(dict):
                     data['id'] = value.pk
 
                 name = value.field_definition.name
-
-                if name not in self._collection_fields:
-                    self._collection_fields[name] = []
 
                 self._collection_fields[name].append(data)
 
@@ -1048,7 +1069,8 @@ class UDFDictionary(dict):
         udf = self._get_udf_or_error(key)
 
         if udf.iscollection:
-            self.instance.dirty_collection_udfs[key] = True
+            self.instance.dirty_collection_udfs.add(key)
+            # TODO: does this still hold for HStoreField?
             # HStoreDict cleans values in-place, so we need to do a deep-copy
             self.collection_fields[key] = copy.deepcopy(val)
         else:
@@ -1162,7 +1184,7 @@ class UDFModel(UserTrackable, models.Model):
         self._do_not_track |= self.do_not_track | self._collection_field_names
         self.populate_previous_state()
 
-        self.dirty_collection_udfs = {}
+        self.dirty_collection_udfs = set()
 
     @classproperty
     def do_not_track(cls):
@@ -1329,44 +1351,47 @@ class UDFModel(UserTrackable, models.Model):
         # We may need to get a primary key here before we continue
         super(UDFModel, self).save_with_user(user, *args, **kwargs)
 
-        collection_values = self.udfs._base_collection_fields(clean=False)
+        dirty_collection_values = {
+                field_name: values
+                for field_name, values in
+                self.udfs._base_collection_fields(clean=False).iteritems()
+                if field_name in self.dirty_collection_udfs}
 
         fields = {field.name: field
                   for field in self.get_user_defined_fields()}
 
-        for field_name, values in collection_values.iteritems():
-            if self.dirty_collection_udfs.get(field_name):
-                field = fields[field_name]
+        for field_name, values in dirty_collection_values.iteritems():
+            field = fields[field_name]
 
-                ids_specified = []
-                for value_dict in values:
-                    kwargs = {'field_definition': field,
-                              'model_id': self.pk}
-                    if 'id' in value_dict:
-                        id = value_dict['id']
-                        del value_dict['id']
+            ids_specified = []
+            for value_dict in values:
+                kwargs = {'field_definition': field,
+                          'model_id': self.pk}
+                if 'id' in value_dict:
+                    id = value_dict['id']
+                    del value_dict['id']
 
-                        kwargs['pk'] = id
-                        udcv = UserDefinedCollectionValue.objects.get(**kwargs)
-                    else:
-                        udcv = UserDefinedCollectionValue(**kwargs)
+                    kwargs['pk'] = id
+                    udcv = UserDefinedCollectionValue.objects.get(**kwargs)
+                else:
+                    udcv = UserDefinedCollectionValue(**kwargs)
 
-                    if udcv.data != value_dict:
-                        udcv.data = value_dict
-                        udcv.save_with_user(user)
+                if udcv.data != value_dict:
+                    udcv.data = value_dict
+                    udcv.save_with_user(user)
 
-                    ids_specified.append(udcv.pk)
+                ids_specified.append(udcv.pk)
 
-                # Delete all values that weren't presented here
-                field.userdefinedcollectionvalue_set\
-                    .filter(model_id=self.pk)\
-                    .exclude(id__in=ids_specified)\
-                    .delete()
+            # Delete all values that weren't presented here
+            field.userdefinedcollectionvalue_set\
+                .filter(model_id=self.pk)\
+                .exclude(id__in=ids_specified)\
+                .delete()
 
         # We need to reload collection UDFs in order to have their IDs set
         self.udfs.force_reload_of_collection_fields()
 
-        self.dirty_collection_udfs = {}
+        self.dirty_collection_udfs = set()
 
     def clean_udfs(self):
         scalar_fields = {field.name: field

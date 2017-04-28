@@ -225,3 +225,7 @@ def get_name_from_canonical_name(canonical_name):
 
 def make_udf_name_from_key(key):
     return 'udf:{}'.format(key)
+
+
+def make_udf_lookup_from_key(key):
+    return 'udfs__{}'.format(key)
