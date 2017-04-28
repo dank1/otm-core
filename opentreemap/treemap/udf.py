@@ -4,12 +4,12 @@
 treemap.udf
 
 Entry points:
-- `UDFModel`, a base class for models that need user defined fields
-- `UserDefinedFieldDefinition`, defines the name, data type, and model type
-  for a user defined field, for a given treemap instance, as a
-  scalar or a collection
-- `UserDefinedCollectionValue`, an HStore collection value for a
-  specific `UserDefinedFieldDefinition` on a specific model instance
+-   `UDFModel`, a base class for models that need user defined fields
+-   `UserDefinedFieldDefinition`, defines the name, data type, and model type
+    for a user defined field, for a given treemap instance, as a
+    scalar or a collection
+-   `UserDefinedCollectionValue`, an HStore collection value for a
+    specific `UserDefinedFieldDefinition` on a specific model instance
 
 Guts (tl;dr):
 
@@ -28,22 +28,22 @@ from the `udfs` column.
 
 `udfs` can't be an ordinary `dict` instance because it has to also
 act as a gateway to collection custom fields,
-so we subclass `HStoreField` as `UDFField` and perform magic to
-head off the replacement with a `dict` to instead replace with a
-`UDFDictionary` that knows how to handle collections.
+so we subclass `HStoreField` as `UDFField` and perform magic
+consisting of the trio, (`UDFField`, `UDFDescriptor`, `UDFDictionary`)
+to replace with a `UDFDictionary` instead of a plain `dict`.
+`UDFDictionary` knows how to handle collections.
 
 The `UDFField` does this by supplying a `contribute_to_class` method,
 which acts as `setattr` on the model class to tell it to replace
 the `UDFField` with a `UDFDescriptor`, which has `__get__` and `__set__`
-which substitute a `UDFDictionary` based on the `dict` that
-`HStoreField` would have supplied, with the additional collection feature.
+which substitute a `UDFDictionary` based on the `dict` supplied by django
+for the `HStoreField`, with the additional collection feature.
 '''
 
 from __future__ import print_function
 from __future__ import unicode_literals
 from __future__ import division
 
-from traceback import extract_stack, format_list
 import json
 import copy
 import re
@@ -83,6 +83,12 @@ from treemap.util import (safe_get_model_class, to_object_name,
 from treemap.decorators import classproperty
 
 
+class UDFInitializationException (Exception):
+    def __init__(self, message):
+        super(Exception, self).__init__(message)
+        self.message = message
+
+
 # Allow anything except certain known problem characters.
 # NOTE: Make sure to keep the validation error associated with this up-to-date
 # * '%' in general makes the Django ORM error out.
@@ -91,13 +97,6 @@ from treemap.decorators import classproperty
 # * '"' makes the ORM error out when building 'AS' clauses and wrapping
 #   them with quotes.
 _UDF_NAME_REGEX = re.compile(r'^[^_"%.]+$')
-
-
-# TODO: Remove instrumentation
-def print_stack(trace):
-    stack = format_list([frame for frame in trace
-                         if 'treemap' in frame[0]])
-    print('{}\n'.format('\n'.join(stack[:-1])))
 
 
 def safe_get_udf_model_class(model_string):
@@ -969,17 +968,15 @@ post_delete.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 class UDFDictionary(dict):
 
     def __init__(self, value, field, obj=None, *args, **kwargs):
+        if obj is None:
+            raise UDFInitializationException(
+                    'UDFField {} was initialized without a model instance'
+                    .format(field))
         super(UDFDictionary, self).__init__(value)
         self.instance = obj
 
         self._fields = None
         self._collection_fields = None
-
-        if not obj:
-            # TODO: remove instrumentation
-            print('UDFDictionary.__init__({}, {}, {})\n'.format(
-                value, field, type(obj)))
-            print_stack(extract_stack())
 
     @property
     def collection_data_loaded(self):
@@ -1111,14 +1108,8 @@ class _UDFProxy(UDFField):
         super(_UDFProxy, self).__init__(*args, **kwargs)
         self.column = ('udf', name)
         self.model = None
-        # TODO: remove instrumentation
-        print('_UDFProxy({})\n'.format(name))
-        print_stack(extract_stack())
 
     def to_python(self, value):
-        # TODO: remove instrumentation
-        print('_UDFProxy.to_python({})"\n'.format(value))
-        print_stack(extract_stack())
         return value
 
 
@@ -1228,40 +1219,6 @@ class UDFModel(UserTrackable, models.Model):
                             .filter(current_value__in=pks)\
                             .distinct('model_id')\
                             .values_list('model_id', flat=True)
-
-    @staticmethod
-    def transform_filter_arg(filter_arg):
-        """
-        transform_filter_arg takes 'udf:' style query keywords
-        and transforms them into HStoreField friendly query keywords.
-
-        For example,
-        'udf:Zoning' becomes 'udfs__Zoning',
-        which HStoreField transforms into SQL similar to
-        ("treemap_plot"."udfs"->'Plant Date')::timestamp =
-            '2000-01-02'::timestamp
-
-        'tree__udf:Plant Date__gt' becomes 'udfs__Plant Date__gt'
-        NOTE: the regex transforms this into
-        (model = 'tree__', udf_name = 'Plant Date', lookup = '__gt')
-        but what are we supposed to do with `model`?
-
-        """
-        match = UDF_LOOKUP_PATTERN.match(filter_arg)
-
-        if match:
-            model, udf_name, lookup = match.groups()
-
-            # TODO: remove instrumentation
-            print('transform_filter_arg: filter_arg="{}"\n'.format(filter_arg))
-            print_stack(extract_stack())
-
-            if model is None:
-                model = ''
-
-            arg = model + 'udfs__' + udf_name + lookup
-
-        return arg
 
     def apply_change(self, key, val):
         if key.startswith('udf:'):
