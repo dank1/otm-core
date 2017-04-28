@@ -433,7 +433,7 @@ class UserDefinedFieldDefinition(models.Model):
         else:  # multichoice
             udf_filter = {'instance': self.instance,
                           # grab anything with that key
-                          'udfs__contains': [self.name]}
+                          'udfs__has_key': self.name}
             models = Model.objects.filter(**udf_filter)
 
             for model in models:
@@ -740,7 +740,7 @@ class UserDefinedFieldDefinition(models.Model):
             objects_with_udf_data = (Model
                                      .objects
                                      .filter(instance=self.instance)
-                                     .filter(udfs__contains=[self.name]))
+                                     .filter(udfs__has_key=self.name))
 
             for obj in objects_with_udf_data:
                 del obj.udfs[self.name]
