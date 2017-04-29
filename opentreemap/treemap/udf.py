@@ -86,7 +86,7 @@ from treemap.decorators import classproperty
 UDF_RESERVED_NAMES = set(HStoreField.class_lookups.keys())
 
 
-class UDFInitializationException (Exception):
+class UDFInitializationException(Exception):
     def __init__(self, message):
         super(Exception, self).__init__(message)
         self.message = message
@@ -832,7 +832,7 @@ class UserDefinedFieldDefinition(models.Model):
                 value = json.dumps(value, ensure_ascii=False)
             else:
                 value = None  # so "missing data" searches will work
-        if value:
+        if value is not None:
             return value if isinstance(value, unicode) else str(value)
         else:
             return None
