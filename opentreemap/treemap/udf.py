@@ -986,16 +986,19 @@ post_delete.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 
 
 class UDFDictionary(dict):
+    '''
+    UDFDictionary requires a handle on the model instance in order to
+    lookup collection UDFs.
+    '''
 
     def __init__(self, value, field, obj=None, *args, **kwargs):
         if obj is None:
             raise UDFInitializationException(
                     'UDFField {} was initialized without a model instance'
-                    .format(field))
+                    .format(field.name))
         super(UDFDictionary, self).__init__(value)
         self.instance = obj
 
-        self._fields = None
         self._collection_fields = None
 
     @property
@@ -1082,16 +1085,22 @@ class UDFDescriptor(Creator):
     def __get__(self, obj, type=None):
         if obj is None:
             return None
-        # UDFDictionary needs a reference to the model instance to lookup
-        # collection UDFs
-        udf_dict = obj.__dict__[self.field.name] or \
-            UDFDictionary({}, self.field, obj)
-        udf_dict.instance = obj
+        obj_name = obj.__class__.__name__
+        udf_dict = obj.__dict__[self.field.name]
+        if udf_dict is None:
+            print('Cannot get {}.{}, creating empty dict'.format(
+                obj_name, self.field.name))
+            udf_dict = {}
+        if not isinstance(udf_dict, dict):
+            raise UDFInitializationException(
+                '{}.{} is a {}, but should be a dict'.format(
+                    obj_name, self.field.name, type(udf_dict)))
 
         return udf_dict
 
     def __set__(self, obj, value):
         value = self.field.to_python(value)
+        obj_name = obj.__class__.__name__
         if isinstance(value, dict):
             value = UDFDictionary(value=value, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`
