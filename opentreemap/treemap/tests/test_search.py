@@ -129,8 +129,8 @@ def _create_tree_and_plot(instance, user, point,
 class FilterParserScalarTests(OTMTestCase):
     def setUp(self):
         self.parse_dict_value = partial(
-                search._parse_dict_value_for_mapping,
-                search.PREDICATE_TYPES)
+            search._parse_dict_value_for_mapping,
+            search.PREDICATE_TYPES)
 
     def test_key_parser_plots(self):
         # Plots searches on plot go directly to a field
@@ -521,8 +521,8 @@ class SearchTests(OTMTestCase):
         self.instance = make_instance(point=self.p1)
         self.commander = make_commander_user(self.instance)
         self.parse_dict_value = partial(
-                search._parse_dict_value_for_mapping,
-                search.PREDICATE_TYPES)
+            search._parse_dict_value_for_mapping,
+            search.PREDICATE_TYPES)
 
     def create_tree_and_plot(self, plotudfs=None, treeudfs=None):
         plot = Plot(geom=self.p1, instance=self.instance)
