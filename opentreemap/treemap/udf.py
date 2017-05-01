@@ -1421,8 +1421,10 @@ class UDFModel(UserTrackable, models.Model):
                 errors[make_udf_name_from_key(key)] = [_(
                     'Invalid user defined field name')]
 
-        # Clean collection values, but only if they were loaded
-        if self.udfs.collection_data_loaded:
+        # Clean collection values, but only if they were loaded.
+        # If the dictionary is empty, it might be a standard `dict`,
+        # without the attribute `collection_data_loaded`, so use `getattr`.
+        if getattr(self.udfs, 'collection_data_loaded', None):
             collection_data = self.udfs.collection_fields
             for collection_field_name, data in collection_data.iteritems():
                 collection_field = collection_fields.get(
