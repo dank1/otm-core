@@ -994,8 +994,8 @@ class UDFDictionary(dict):
     def __init__(self, value, field, obj=None, *args, **kwargs):
         if obj is None:
             raise UDFInitializationException(
-                    'UDFField {} was initialized without a model instance'
-                    .format(field.name))
+                'UDFField {} was initialized without a model instance'
+                .format(field.name))
         super(UDFDictionary, self).__init__(value)
         self.instance = obj
 
@@ -1088,8 +1088,6 @@ class UDFDescriptor(Creator):
         obj_name = obj.__class__.__name__
         udf_dict = obj.__dict__[self.field.name]
         if udf_dict is None:
-            print('Cannot get {}.{}, creating empty dict'.format(
-                obj_name, self.field.name))
             udf_dict = {}
         if not isinstance(udf_dict, dict):
             raise UDFInitializationException(
@@ -1100,7 +1098,6 @@ class UDFDescriptor(Creator):
 
     def __set__(self, obj, value):
         value = self.field.to_python(value)
-        obj_name = obj.__class__.__name__
         if isinstance(value, dict):
             value = UDFDictionary(value=value, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`
@@ -1361,10 +1358,10 @@ class UDFModel(UserTrackable, models.Model):
         super(UDFModel, self).save_with_user(user, *args, **kwargs)
 
         dirty_collection_values = {
-                field_name: values
-                for field_name, values in
-                self.udfs._base_collection_fields(clean=False).iteritems()
-                if field_name in self.dirty_collection_udfs}
+            field_name: values
+            for field_name, values in
+            self.udfs._base_collection_fields(clean=False).iteritems()
+            if field_name in self.dirty_collection_udfs}
 
         fields = {field.name: field
                   for field in self.get_user_defined_fields()}
