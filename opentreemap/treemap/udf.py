@@ -1134,12 +1134,15 @@ class UDFDescriptor(Creator):
 
     def __set__(self, obj, value):
         value = self.field.to_python(value)
-        if isinstance(value, dict):
-            value = UDFDictionary(value=value, field=self.field, obj=obj)
+        print('UDFDescriptor set a {} on {}'.format(
+            'dict' if isinstance(value, dict) else
+            'None' if value is None else
+            type(value),
+            hex(id(obj))))
+        udf_dict = value if isinstance(value, dict) else {}
+        field_data = UDFDictionary(value=udf_dict, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`
-        obj.__dict__[self.field.name] = value
-        print('UDFDescriptor set {} on {}'.format(
-            hex(id(value)), hex(id((obj)))))
+        obj.__dict__[self.field.name] = field_data
 
 
 class UDFField(HStoreField):

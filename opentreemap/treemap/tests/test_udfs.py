@@ -51,6 +51,35 @@ def make_collection_udf(instance, name='Stewardship', model='Plot',
         name=name)
 
 
+class SimpleUDFTest(OTMTestCase):
+    def setUp(self):
+        psycopg2.extras.register_hstore(connection.cursor(), globally=True)
+
+        self.p = Point(0, 0)
+        self.instance = make_instance(point=self.p)
+        self.commander_user = make_commander_user(self.instance)
+        set_write_permissions(self.instance, self.commander_user,
+                              'Plot',
+                              ['udf:Test choice'])
+
+        UserDefinedFieldDefinition.objects.create(
+            instance=self.instance,
+            model_type='Plot',
+            datatype=json.dumps({'type': 'choice',
+                                 'choices': ['a', 'b', 'c']}),
+            iscollection=False,
+            name='Test choice')
+
+        self.plot = Plot(geom=self.p, instance=self.instance)
+        self.plot.save_with_user(self.commander_user)
+        self.plot.udfs['Test choice'] = 'a'
+        self.plot.save_with_user(self.commander_user)
+
+    def testFilter(self):
+        plots = Plot.objects.filter(**{'udfs__Test choice': 'a'})
+        self.assertEqual(1, plots.count())
+
+
 class ScalarUDFFilterTest(OTMTestCase):
     def setUp(self):
         psycopg2.extras.register_hstore(connection.cursor(), globally=True)
