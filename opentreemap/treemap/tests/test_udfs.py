@@ -118,13 +118,13 @@ class ScalarUDFFilterTest(OTMTestCase):
         self.choice_c = create_and_save_with_choice('c', n=7)
 
     def test_filtering_on_string_and_choice_using_count(self):
-        plots = Plot.objects.filter(**{'udf:Test choice': 'a'})
+        plots = Plot.objects.filter(**{'udfs__Test choice': 'a'})
         self.assertEqual(
             len(self.choice_a),
             plots.count())
 
     def test_filtering_on_value_works(self):
-        plots = Plot.objects.filter(**{'udf:Test choice': 'b'})
+        plots = Plot.objects.filter(**{'udfs__Test choice': 'b'})
         self.assertEqual(
             self.choice_b,
             {plot.pk for plot in plots})
@@ -143,13 +143,13 @@ class ScalarUDFFilterTest(OTMTestCase):
         plot_b.geom = p
         plot_b.save_with_user(self.commander_user)
 
-        a_in_poly = Plot.objects.filter(**{'udf:Test choice': 'a'})\
+        a_in_poly = Plot.objects.filter(**{'udfs__Test choice': 'a'})\
                                 .filter(geom__contained=poly)
 
         self.assertEqual({plot.pk for plot in a_in_poly},
                          {plot_a.pk, })
 
-        b_in_poly = Plot.objects.filter(**{'udf:Test choice': 'b'})\
+        b_in_poly = Plot.objects.filter(**{'udfs__Test choice': 'b'})\
                                 .filter(geom__contained=poly)
 
         self.assertEqual({plot.pk for plot in b_in_poly},
@@ -206,7 +206,7 @@ class ScalarUDFFilterTest(OTMTestCase):
 
     def test_date_ordering_normal(self):
         dates = self._setup_dates()
-        plots = Plot.objects.filter(**{'udf:Test date__isnull': False})\
+        plots = Plot.objects.filter(**{'udfs__Test date__isnull': False})\
                             .order_by('MapFeature.udf:Test date')
 
         dates.sort()
@@ -217,7 +217,7 @@ class ScalarUDFFilterTest(OTMTestCase):
 
     def test_date_ordering_reverse(self):
         dates = self._setup_dates()
-        plots = Plot.objects.filter(**{'udf:Test date__isnull': False})\
+        plots = Plot.objects.filter(**{'udfs__Test date__isnull': False})\
                             .order_by('-MapFeature.udf:Test date')
 
         dates.sort()
@@ -231,10 +231,10 @@ class ScalarUDFFilterTest(OTMTestCase):
         self._setup_dates()
         adate = datetime(2011, 1, 1)
 
-        plots = Plot.objects.filter(**{'udf:Test date__gt': adate})
+        plots = Plot.objects.filter(**{'udfs__Test date__gt': adate})
         self.assertEqual(len(plots), 5)
 
-        plots = Plot.objects.filter(**{'udf:Test date__lt': adate})
+        plots = Plot.objects.filter(**{'udfs__Test date__lt': adate})
         self.assertEqual(len(plots), 4)
 
     def test_integer_gt_and_lte_constraints(self):
@@ -247,7 +247,7 @@ class ScalarUDFFilterTest(OTMTestCase):
         for i in xrange(0, 7):
             create_plot_with_num(i)
 
-        plots = Plot.objects.filter(**{'udf:Test int__gt': 2,
+        plots = Plot.objects.filter(**{'udfs__Test int__gt': 2,
                                        'udf:Test int__lte': 4})
         self.assertEqual(len(plots), 2)
 
@@ -262,7 +262,7 @@ class ScalarUDFFilterTest(OTMTestCase):
         for i in xrange(10, 30):
             create_plot_with_num(float(i)/10.0)
 
-        plots = Plot.objects.filter(**{'udf:Test float__gt': 1.5,
+        plots = Plot.objects.filter(**{'udfs__Test float__gt': 1.5,
                                        'udf:Test float__lte': 2.0})
 
         self.assertEqual(len(plots), 5)  # 1.6, 1.7, 1.8, 1.9, 2.0

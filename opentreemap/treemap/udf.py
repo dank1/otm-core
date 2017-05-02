@@ -1081,18 +1081,54 @@ class UDFDictionary(dict):
             super(UDFDictionary, self).__setitem__(key, val)
 
 
+class UDFStubDictionary(dict):
+    '''
+    `UDFDictionary ` requires a handle on the model instance in order to
+    lookup collection UDFs.
+
+    Sometimes `UDFDictionary ` specific properties need to be accessed before
+    the `UDFDescriptor` can be called with the model instance.
+
+    In that special case, use `UDFStubDictionary`, which has the same interface
+    as `UDFDictionary`, but all stubbed.
+    '''
+    @property
+    def collection_data_loaded(self):
+        return False
+
+    @property
+    def collection_fields(self):
+        """
+        Lazy loading of collection fields
+        """
+        return self._base_collection_fields(clean=True)
+
+    def _get_udf_or_error(self, key):
+        raise KeyError("Couldn't find UDF for field '%s'" % key)
+
+    def _base_collection_fields(self, clean):
+        return {}
+
+    def force_reload_of_collection_fields(self):
+        pass
+
+
 class UDFDescriptor(Creator):
     def __get__(self, obj, type=None):
         if obj is None:
+            print('UDFDescriptor get called with no model obj')
             return None
         obj_name = obj.__class__.__name__
         udf_dict = obj.__dict__[self.field.name]
         if udf_dict is None:
-            udf_dict = {}
+            udf_dict = UDFStubDictionary()
         if not isinstance(udf_dict, dict):
             raise UDFInitializationException(
                 '{}.{} is a {}, but should be a dict'.format(
                     obj_name, self.field.name, type(udf_dict)))
+        if not isinstance(udf_dict, UDFDictionary):
+            print('UDFDescriptor get found {} before set on {}'.format(
+                hex(id(udf_dict)), hex(id(obj))))
 
         return udf_dict
 
@@ -1102,12 +1138,13 @@ class UDFDescriptor(Creator):
             value = UDFDictionary(value=value, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`
         obj.__dict__[self.field.name] = value
+        print('UDFDescriptor set {} on {}'.format(
+            hex(id(value)), hex(id((obj)))))
 
 
 class UDFField(HStoreField):
     '''
     UDFField(HStoreField)
-
 
     `django.contrib.postgres.fields.HStoreField`
     has magic that replaces it with an ordinary `dict`,
@@ -1121,7 +1158,7 @@ class UDFField(HStoreField):
     # Overridden to convert dict values to UDFDictionary values
     def get_prep_value(self, value):
         if isinstance(value, dict) and not isinstance(value, UDFDictionary):
-            return UDFDictionary(value, self)
+            return UDFStubDictionary(value)
         else:
             return value
 
@@ -1331,18 +1368,19 @@ class UDFModel(UserTrackable, models.Model):
 
         for field_obj in self.get_user_defined_fields():
             field = field_obj.name
-            value = self.udfs[field]
+            value = self.udfs.get('field', None)
 
-            if field_obj.iscollection:
-                # For colllection UDFs, we need to format each subvalue inside
-                # each dictionary
-                value = [{k: _format_value(val)
-                         for k, val in sub_dict.iteritems()}
-                         for sub_dict in value]
-            else:
-                value = _format_value(value)
+            if value is not None:
+                if field_obj.iscollection:
+                    # For colllection UDFs, we need to format each subvalue
+                    # inside each dictionary
+                    value = [{k: _format_value(val)
+                             for k, val in sub_dict.iteritems()}
+                             for sub_dict in value]
+                else:
+                    value = _format_value(value)
 
-            base_model_dict['udf:' + field] = value
+                base_model_dict['udf:' + field] = value
 
         # Torch the "udfs" dictionary
         del base_model_dict['udfs']
