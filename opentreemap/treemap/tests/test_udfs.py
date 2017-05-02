@@ -24,9 +24,7 @@ from treemap.lib.udf import udf_create
 from treemap.instance import create_stewardship_udfs
 from treemap.udf import UserDefinedFieldDefinition
 from treemap.models import Instance, Plot, User
-from treemap.audit import (AuthorizeException, FieldPermission, Role,
-                           approve_or_reject_audit_and_apply,
-                           approve_or_reject_audits_and_apply)
+from treemap.audit import AuthorizeException, FieldPermission, Role
 from treemap.tests.base import OTMTestCase
 
 
@@ -348,43 +346,6 @@ class UDFAuditTest(OTMTestCase):
         self.assertRaises(AuthorizeException,
                           self.plot.save_with_user, self.commander_user)
 
-    def test_create_and_apply_pending(self):
-        pending = self.plot.audits().filter(requires_auth=True)
-
-        self.assertEqual(len(pending), 0)
-
-        role = self.commander_user.get_role(self.instance)
-        fp, __ = FieldPermission.objects.get_or_create(
-            model_name='Plot', field_name='udf:Test unauth',
-            permission_level=FieldPermission.WRITE_WITH_AUDIT,
-            role=role, instance=self.instance)
-
-        self.plot.udfs['Test unauth'] = 'c'
-        self.plot.save_with_user(self.commander_user)
-
-        reloaded_plot = Plot.objects.get(pk=self.plot.pk)
-
-        self.assertEqual(
-            reloaded_plot.udfs['Test unauth'],
-            None)
-
-        pending = self.plot.audits().filter(requires_auth=True)
-
-        self.assertEqual(len(pending), 1)
-
-        fp.permission_level = FieldPermission.WRITE_DIRECTLY
-        fp.save()
-
-        approve_or_reject_audit_and_apply(pending[0],
-                                          self.commander_user,
-                                          True)
-
-        reloaded_plot = Plot.objects.get(pk=self.plot.pk)
-
-        self.assertEqual(
-            reloaded_plot.udfs['Test unauth'],
-            'c')
-
     def test_create_invalid_pending_collection(self):
         pending = self.plot.audits().filter(requires_auth=True)
 
@@ -400,47 +361,6 @@ class UDFAuditTest(OTMTestCase):
             {'a choice': 'invalid choice', 'a string': 's'}]
         self.assertRaises(ValidationError,
                           self.plot.save_with_user, self.commander_user)
-
-    def test_create_and_apply_pending_collection(self):
-        pending = self.plot.audits().filter(requires_auth=True)
-
-        self.assertEqual(len(pending), 0)
-
-        role = self.commander_user.get_role(self.instance)
-        fp, __ = FieldPermission.objects.get_or_create(
-            model_name='Plot', field_name='udf:Test collection',
-            permission_level=FieldPermission.WRITE_WITH_AUDIT,
-            role=role, instance=self.instance)
-
-        self.plot.udfs['Test collection'] = [
-            {'a choice': 'a', 'a string': 's'}]
-        self.plot.save_with_user(self.commander_user)
-
-        reloaded_plot = Plot.objects.get(pk=self.plot.pk)
-
-        self.assertEqual(
-            reloaded_plot.udfs['Test collection'],
-            [])
-
-        pending = self.plot.audits().filter(requires_auth=True)
-
-        # Expecting 'model_id', 'id', 'field def id'
-        # and two udf fields ('a string' and 'a choice')
-        self.assertEqual(len(pending), 5)
-
-        fp.permission_level = FieldPermission.WRITE_DIRECTLY
-        fp.save()
-
-        approve_or_reject_audits_and_apply(pending,
-                                           self.commander_user,
-                                           True)
-
-        reloaded_plot = Plot.objects.get(pk=self.plot.pk)
-
-        col = reloaded_plot.udfs['Test collection']
-        self.assertEqual(len(col), 1)
-        self.assertEqual(col[0]['a choice'], 'a')
-        self.assertEqual(col[0]['a string'], 's')
 
 
 class UDFDefTest(OTMTestCase):

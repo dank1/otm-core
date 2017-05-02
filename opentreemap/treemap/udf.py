@@ -1378,8 +1378,8 @@ class UDFModel(UserTrackable, models.Model):
         base_model_dict = super(UDFModel, self).as_dict(*args, **kwargs)
 
         for field_obj in self.get_user_defined_fields():
-            field = field_obj.name
-            value = self.udfs.get('field', None)
+            field_name = field_obj.name
+            value = self.udfs.get(field_name, None)
 
             if value is not None:
                 if field_obj.iscollection:
@@ -1391,7 +1391,7 @@ class UDFModel(UserTrackable, models.Model):
                 else:
                     value = _format_value(value)
 
-                base_model_dict['udf:' + field] = value
+            base_model_dict['udf:' + field_name] = value
 
         # Torch the "udfs" dictionary
         del base_model_dict['udfs']
