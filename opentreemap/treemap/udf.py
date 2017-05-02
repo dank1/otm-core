@@ -38,6 +38,17 @@ which acts as `setattr` on the model class to tell it to replace
 the `UDFField` with a `UDFDescriptor`, which has `__get__` and `__set__`
 which substitute a `UDFDictionary` based on the `dict` supplied by django
 for the `HStoreField`, with the additional collection feature.
+
+In the app, django supplies a `dict` for `UDFDescriptor` to build the
+`UDFDictionary`, but in tests, django usually supplies `None`.
+
+NOTE:
+
+`HStoreField` does not implement an ordering transform, see
+https://code.djangoproject.com/ticket/24747
+
+If it becomes necessary, see
+http://stackoverflow.com/a/43745677/14405
 '''
 
 from __future__ import print_function
@@ -1121,6 +1132,7 @@ class UDFDescriptor(Creator):
         obj_name = obj.__class__.__name__
         udf_dict = obj.__dict__[self.field.name]
         if udf_dict is None:
+            # This should never happen, but it seems to happen in tests.
             udf_dict = UDFStubDictionary()
         if not isinstance(udf_dict, dict):
             raise UDFInitializationException(
@@ -1134,11 +1146,7 @@ class UDFDescriptor(Creator):
 
     def __set__(self, obj, value):
         value = self.field.to_python(value)
-        print('UDFDescriptor set a {} on {}'.format(
-            'dict' if isinstance(value, dict) else
-            'None' if value is None else
-            type(value),
-            hex(id(obj))))
+        # The app supplies a `dict` value, but the tests supply `None`.
         udf_dict = value if isinstance(value, dict) else {}
         field_data = UDFDictionary(value=udf_dict, field=self.field, obj=obj)
         # setattr goes into infinite recursion, so fish in `__dict__`

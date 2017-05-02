@@ -51,35 +51,6 @@ def make_collection_udf(instance, name='Stewardship', model='Plot',
         name=name)
 
 
-class SimpleUDFTest(OTMTestCase):
-    def setUp(self):
-        psycopg2.extras.register_hstore(connection.cursor(), globally=True)
-
-        self.p = Point(0, 0)
-        self.instance = make_instance(point=self.p)
-        self.commander_user = make_commander_user(self.instance)
-        set_write_permissions(self.instance, self.commander_user,
-                              'Plot',
-                              ['udf:Test choice'])
-
-        UserDefinedFieldDefinition.objects.create(
-            instance=self.instance,
-            model_type='Plot',
-            datatype=json.dumps({'type': 'choice',
-                                 'choices': ['a', 'b', 'c']}),
-            iscollection=False,
-            name='Test choice')
-
-        self.plot = Plot(geom=self.p, instance=self.instance)
-        self.plot.save_with_user(self.commander_user)
-        self.plot.udfs['Test choice'] = 'a'
-        self.plot.save_with_user(self.commander_user)
-
-    def testFilter(self):
-        plots = Plot.objects.filter(**{'udfs__Test choice': 'a'})
-        self.assertEqual(1, plots.count())
-
-
 class ScalarUDFFilterTest(OTMTestCase):
     def setUp(self):
         psycopg2.extras.register_hstore(connection.cursor(), globally=True)
@@ -197,7 +168,7 @@ class ScalarUDFFilterTest(OTMTestCase):
             return {plot.pk
                     for plot
                     in Plot.objects.filter(
-                        **{'udf:Test string' + sfx: val})}
+                        **{'udfs__Test string' + sfx: val})}
 
         self.assertEqual(set(), run('', 'also'))
 
@@ -233,38 +204,10 @@ class ScalarUDFFilterTest(OTMTestCase):
 
         return dates
 
-    def test_date_ordering_normal(self):
+    def test_has_key(self):
         dates = self._setup_dates()
-        plots = Plot.objects.filter(**{'udfs__Test date__isnull': False})\
-                            .order_by('MapFeature.udf:Test date')
-
-        dates.sort()
-
-        selected_dates = [plot.udfs['Test date']
-                          for plot in plots]
-        self.assertEqual(dates, selected_dates)
-
-    def test_date_ordering_reverse(self):
-        dates = self._setup_dates()
-        plots = Plot.objects.filter(**{'udfs__Test date__isnull': False})\
-                            .order_by('-MapFeature.udf:Test date')
-
-        dates.sort()
-        dates.reverse()
-
-        selected_dates = [plot.udfs['Test date']
-                          for plot in plots]
-        self.assertEqual(dates, selected_dates)
-
-    def test_date_ordering_gt(self):
-        self._setup_dates()
-        adate = datetime(2011, 1, 1)
-
-        plots = Plot.objects.filter(**{'udfs__Test date__gt': adate})
-        self.assertEqual(len(plots), 5)
-
-        plots = Plot.objects.filter(**{'udfs__Test date__lt': adate})
-        self.assertEqual(len(plots), 4)
+        plots = Plot.objects.filter(**{'udfs__has_key': 'Test date'})
+        self.assertEqual(len(plots), len(dates))
 
     def test_integer_gt_and_lte_constraints(self):
         def create_plot_with_num(anint):
@@ -277,7 +220,7 @@ class ScalarUDFFilterTest(OTMTestCase):
             create_plot_with_num(i)
 
         plots = Plot.objects.filter(**{'udfs__Test int__gt': 2,
-                                       'udf:Test int__lte': 4})
+                                       'udfs__Test int__lte': 4})
         self.assertEqual(len(plots), 2)
 
     def test_float_gt_and_lte_constraints(self):
@@ -292,13 +235,13 @@ class ScalarUDFFilterTest(OTMTestCase):
             create_plot_with_num(float(i)/10.0)
 
         plots = Plot.objects.filter(**{'udfs__Test float__gt': 1.5,
-                                       'udf:Test float__lte': 2.0})
+                                       'udfs__Test float__lte': 2.0})
 
         self.assertEqual(len(plots), 5)  # 1.6, 1.7, 1.8, 1.9, 2.0
 
     def test_using_q_objects(self):
-        qb = Q(**{'udf:Test choice': 'b'})
-        qc = Q(**{'udf:Test choice': 'c'})
+        qb = Q(**{'udfs__Test choice': 'b'})
+        qc = Q(**{'udfs__Test choice': 'c'})
 
         q = qb | qc
 
