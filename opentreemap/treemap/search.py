@@ -426,7 +426,7 @@ def _parse_min_max_value_fn(operator, is_hstore=True):
 
         value = _parse_value(raw_value)
 
-        if is_hstore:  # implies hstore
+        if is_hstore:
             if isinstance(value, datetime):
                 value = value.date().isoformat()
             elif not isinstance(value, float):
