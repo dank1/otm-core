@@ -205,7 +205,7 @@ def _parse_scalar_predicate(query, mapping):
         query = {_lookup_key(prefix, search_key, k): v for (k, v)
                  in parse_dict_value(value).iteritems()} \
             if isinstance(value, dict) \
-            else {search_key: value}
+            else {prefix + search_key: value}
 
         return FilterContext(basekey=model, **query)
 
@@ -339,7 +339,7 @@ def _parse_predicate_key(key, mapping):
     yielding (<model>, mapping[<model>], <field>).
 
     A scalar UDF search key looks like '<model>.udf:<field>',
-    yielding (<model>, mapping[<model>], udfs__<field>).
+    yielding (<model>, mapping[<model>], udf:<field>).
 
     A regular field looks like '<model>.<field>',
     yielding (<model>, mapping[<model>], <field>).
