@@ -694,7 +694,8 @@ class UserDefinedFieldDefinition(models.Model):
 
         if datatype['type'] not in ['float', 'int', 'string',
                                     'choice', 'date', 'multichoice']:
-            raise ValidationError(_('invalid datatype'))
+            raise ValidationError(_('invalid datatype {}'.format(
+                datatype['type'])))
 
         if datatype['type'] in ('choice', 'multichoice'):
             choices = datatype.get('choices', None)

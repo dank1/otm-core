@@ -736,7 +736,7 @@ class ScalarUDFTest(OTMTestCase):
                 iscollection=False,
                 name='Test %s' % dtype)
 
-        allowed_types = 'float', 'int', 'string', 'user', 'date'
+        allowed_types = 'float', 'int', 'string', 'date'
 
         addl_fields = ['udf:Test %s' % ttype for ttype in allowed_types]
         addl_fields.append('udf:Test choice')
