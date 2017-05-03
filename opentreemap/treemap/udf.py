@@ -1040,7 +1040,7 @@ class UDFDictionary(dict):
         return key in [field.name for field
                        in self.instance.get_user_defined_fields()]
 
-    def __getitem__(self, key):
+    def __getitem__(self, key, clean=True):
         udf = self._get_udf_or_error(key)
 
         if udf.iscollection:
@@ -1049,7 +1049,7 @@ class UDFDictionary(dict):
             if super(UDFDictionary, self).__contains__(key):
                 v = super(UDFDictionary, self).__getitem__(key)
                 try:
-                    return udf.clean_value(v)
+                    return udf.clean_value(v) if clean else v
                 except:
                     return v
             else:
@@ -1082,11 +1082,11 @@ class UDFDictionary(dict):
         except KeyError:
             return False
 
-    def iteritems(self):
+    def iteritems(self, clean=False):
         for udfd in self.instance.get_user_defined_fields():
             v = None
             try:
-                v = self[udfd.name]
+                v = self.__getitem__(udfd.name, clean)
             except KeyError:
                 pass
             yield udfd.name, v
@@ -1095,18 +1095,18 @@ class UDFDictionary(dict):
         for k, v in self.iteritems():
             yield k
 
-    def itervalues(self):
-        for k, v in self.iteritems():
+    def itervalues(self, clean=False):
+        for k, v in self.iteritems(clean):
             yield v
 
-    def items(self):
-        return [i for i in self.iteritems()]
+    def items(self, clean=False):
+        return [i for i in self.iteritems(clean)]
 
     def keys(self):
         return [k for k in self.iterkeys()]
 
-    def values(self):
-        return [v for v in self.itervalues()]
+    def values(self, clean=False):
+        return [v for v in self.itervalues(clean)]
 
 
 class UDFStubDictionary(dict):
