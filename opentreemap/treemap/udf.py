@@ -693,8 +693,7 @@ class UserDefinedFieldDefinition(models.Model):
             raise ValidationError(_('type required data type definition'))
 
         if datatype['type'] not in ['float', 'int', 'string',
-                                    'user', 'choice', 'date',
-                                    'multichoice']:
+                                    'choice', 'date', 'multichoice']:
             raise ValidationError(_('invalid datatype'))
 
         if datatype['type'] in ('choice', 'multichoice'):
@@ -835,10 +834,7 @@ class UserDefinedFieldDefinition(models.Model):
         return datatypes
 
     def reverse_clean(self, value):
-        if self.datatype_dict['type'] == 'user':
-            if hasattr(value, 'pk'):
-                value = str(value.pk)
-        elif self.datatype_dict['type'] == 'multichoice':
+        if self.datatype_dict['type'] == 'multichoice':
             if value and len(value) > 0:
                 value = json.dumps(value, ensure_ascii=False)
             else:
@@ -853,17 +849,11 @@ class UserDefinedFieldDefinition(models.Model):
         Given a value for this data type, validate and return the
         correct python/django representation.
 
-        For instance, if this is a 'user' field this function will take
-        in a user id (as a string) from the UDF dictionary and return
-        a 'User' object.
-
         If that user doesn't exist a ValidationError will be raised
 
         If datatype_dict isn't passed specifically it will use the
         standard one for this model.
         """
-        from treemap.models import User  # Circular ref issue
-
         if value is None:
             return None
 
@@ -1086,7 +1076,7 @@ class UDFDictionary(dict):
 
     def has_key(self, key):
         try:
-            __ = self[key]
+            self[key]
             return True
         except KeyError:
             return False
