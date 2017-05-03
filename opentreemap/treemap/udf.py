@@ -887,21 +887,6 @@ class UserDefinedFieldDefinition(models.Model):
             except ValueError:
                 raise ValidationError(_('%(fieldname)s must be an integer') %
                                       {'fieldname': self.name})
-        elif datatype == 'user':
-            if isinstance(value, User):
-                return value
-
-            try:
-                pk = int(value)
-            except ValueError:
-                raise ValidationError(_('%(fieldname)s must be an integer') %
-                                      {'fieldname': self.name})
-            try:
-                return User.objects.get(pk=pk)
-            except User.DoesNotExist:
-                raise ValidationError(_('%(fieldname)s user not found') %
-                                      {'fieldname': self.name})
-
         elif datatype == 'date':
             if isinstance(value, (date, datetime)):
                 return value
@@ -1090,6 +1075,47 @@ class UDFDictionary(dict):
         else:
             val = udf.reverse_clean(val)
             super(UDFDictionary, self).__setitem__(key, val)
+
+    # The automated tests require filling in all the collection methods
+
+    def get(self, key, default):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def has_key(self, key):
+        try:
+            __ = self[key]
+            return True
+        except KeyError:
+            return False
+
+    def iteritems(self):
+        for udfd in self.instance.get_user_defined_fields():
+            v = None
+            try:
+                v = self[udfd.name]
+            except KeyError:
+                pass
+            yield udfd.name, v
+
+    def iterkeys(self):
+        for k, v in self.iteritems():
+            yield k
+
+    def itervalues(self):
+        for k, v in self.iteritems():
+            yield v
+
+    def items(self):
+        return [i for i in self.iteritems()]
+
+    def keys(self):
+        return [k for k in self.iterkeys()]
+
+    def values(self):
+        return [v for v in self.itervalues()]
 
 
 class UDFStubDictionary(dict):
@@ -1458,17 +1484,14 @@ class UDFModel(UserTrackable, models.Model):
                              if field.iscollection}
 
         errors = {}
-        # Clean scalar udfs
-        for (key, val) in self.udfs.iteritems():
-            field = scalar_fields.get(key, None)
-            if field:
+
+        for key, field in scalar_fields.iteritems():
+            val = self.udfs[key]
+            if val is not None:
                 try:
                     field.clean_value(val)
                 except ValidationError as e:
                     errors[make_udf_name_from_key(key)] = e.messages
-            else:
-                errors[make_udf_name_from_key(key)] = [_(
-                    'Invalid user defined field name')]
 
         # Clean collection values, but only if they were loaded.
         # If the dictionary is empty, it might be a standard `dict`,
