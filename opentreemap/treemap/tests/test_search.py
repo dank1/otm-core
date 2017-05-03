@@ -141,7 +141,7 @@ class FilterParserScalarTests(OTMTestCase):
     def test_udf_fields_look_good(self):
         match = search._parse_predicate_key('plot.udf:The 1st Planter',
                                             mapping=search.DEFAULT_MAPPING)
-        self.assertEqual(match, ('plot', '', 'udfs__The 1st Planter'))
+        self.assertEqual(match, ('plot', '', 'udf:The 1st Planter'))
 
     def test_key_parser_trees(self):
         # Tree searches on plot require a prefix and the field
@@ -433,13 +433,13 @@ class FilterParserCollectionTests(OTMTestCase):
         # UDF searches go on the specified model's id
         match = search._parse_predicate_key('udf:tree:52.action',
                                             mapping=search.DEFAULT_MAPPING)
-        self.assertEqual(match, ('udf:tree:52', 'tree__id'))
+        self.assertEqual(match, ('udf:tree:52', 'tree__', 'action'))
 
     def test_key_parser_plot_collection_udf(self):
         # UDF searches go on the specified model's id
         match = search._parse_predicate_key('udf:plot:52.action',
                                             mapping=search.DEFAULT_MAPPING)
-        self.assertEqual(match, ('udf:plot:52', 'id'))
+        self.assertEqual(match, ('udf:plot:52', '', 'action'))
 
     def test_parse_collection_udf_simple_predicate(self):
         self._setup_tree_and_collection_udf()
