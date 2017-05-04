@@ -16,6 +16,11 @@ Guts (tl;dr):
 `HStoreField udfs` vs. `UDFDictionary` via `UDFDescriptor`
 ----------------------------------------------------------
 
+NOTE: all this is about to change.
+`udfs` becomes an ordinary model instance attribute,
+and `hstore_udfs` corresponds to the `udfs` column.
+See `UdfsProxy` inside `UDFModel`.
+
 `UDFModel` provides a model with a `udfs` field that corresponds to
 a `udfs` column in the db table for the model.
 
@@ -1269,19 +1274,91 @@ class UDFModel(UserTrackable, models.Model):
     """
     Classes that extend this model gain support for scalar UDF
     fields via the `udfs` field.
+    They must have an `instance` field for this model to work.
 
     This model works correctly with the Auditable and
     Authorizable mixins
     """
 
     __metaclass__ = UDFModelBase
-    udfs = UDFField(db_index=True, blank=True, default={})
+
+    hstore_udfs = HStoreField(
+        db_index=True,
+        blank=True,
+        db_column='udfs')
 
     class Meta:
         abstract = True
 
+    class UdfsProxy(dict):
+        '''
+        `UDFModel().udfs` is now a proxy for `UDFModel().hstore_udfs`,
+        which is the field that corresponds to the actual db column.
+
+        `hstore_udfs` is clean by default and should never be counted upon to
+        be dirty. "clean" means that
+        - Only keys that are actually assigned to the model are in it
+        - All values are either SQL NULL or a string representation of
+          the dirty value
+        - A key assigned to SQL NULL means that the model instance
+          has that key, it just maps to None when dirty
+
+        `udfs` is dirty by default and should never be counted upon to be
+        clean. "dirty" means that
+        - Only keys that are actually assigned to the model are in it
+        - Values are Python native types, including None, bool, numbers,
+          and lists (for multichoice)
+
+        UdfsProxy(obj, *args, **kwargs)
+        obj is a reference to the model instance.
+        '''
+        UNLOADED = 0
+        CLEAN = 1
+        DIRTY = 2
+
+        def __init__(self, obj,
+                     *args, **kwargs):
+            super(UDFModel.UdfsProxy, self).__init__(*args, **kwargs)
+            self._obj = obj
+            self._model_type = obj.__class__.__name__
+            self._status = self.UNLOADED
+            if 0 < len(kwargs):
+                for k, v in kwargs.iteritems():
+                    self[k] = self.convert(k, v)
+
+        def convert(self, k, v):
+            udfds = [d for d in self._obj.get_user_defined_fields()
+                     if d.name == k and d.model_type == self._model_type]
+            if 1 != len(udfds):
+                raise ValidationError(
+                    'udf:{} is not a valid field'.format(k))
+            udfd = udfds[0]
+            self[k] = self.convert_value(udfd, v)
+
+        def convert_value(self, udfd, v):
+            if udfd.iscollection:
+                self.convert_collection_value(udfd, v)
+            else:
+                self.convert_scalar_value(udfd, v)
+
+        def convert_collection_value(self, udfd, v):
+            pass
+
+        def convert_scalar_value(self, udfd, v):
+            pass
+
     def __init__(self, *args, **kwargs):
+        # Model doesn't know anything about `'udfs'`,
+        # so take it out before `super`.
+        udfs_kwarg = kwargs.pop('udfs', {})
+
         super(UDFModel, self).__init__(*args, **kwargs)
+
+        hstore_udfs_kwarg = kwargs.get('hstore_udfs', {})
+        hstore_udfs_kwarg.update(udfs_kwarg)
+
+        self.udfs = self.UdfsProxy(self, hstore_udfs_kwarg)
+
         # Collection UDF audits are handled by the
         # UserDefinedCollectionValue class
         self._collection_field_names = {udfd.canonical_name
@@ -1292,6 +1369,10 @@ class UDFModel(UserTrackable, models.Model):
         self.populate_previous_state()
 
         self.dirty_collection_udfs = set()
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        pass
 
     @classproperty
     def do_not_track(cls):
