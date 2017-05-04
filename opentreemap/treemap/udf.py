@@ -13,6 +13,9 @@ Entry points:
 
 Guts (tl;dr):
 
+`HStoreField udfs` vs. `UDFDictionary` via `UDFDescriptor`
+----------------------------------------------------------
+
 `UDFModel` provides a model with a `udfs` field that corresponds to
 a `udfs` column in the db table for the model.
 
@@ -42,7 +45,40 @@ for the `HStoreField`, with the additional collection feature.
 In the app, django supplies a `dict` for `UDFDescriptor` to build the
 `UDFDictionary`, but in tests, django usually supplies `None`.
 
-NOTE:
+Model Retrieval vs. `udfs`
+--------------------------
+
+Model loading has a hook `from_db`, which we can consider using
+to do a better job of loading the `udfs` model instance attribute.
+https://docs.djangoproject.com/en/1.8/ref/models/instances/
+    #customizing-model-loading
+`def from_db(cls, db, field_names, values)`
+One can create the model instance via
+`cls(**zip(field_names, values))` in the default case.
+
+Ideally, `udfs` would then be pre-loaded with values for the keys
+in native Python form, including numbers and `multichoice` lists.
+
+Model Save vs. `udfs`
+---------------------
+
+`UDFModel` merely inherits from `UserTrackable`, but today,
+all `UDFModel` subclasses also subclass `treemap.audit.PendingAuditable`,
+which subclasses `treemap.audit._PendingAuditable`.
+
+Also, every existing `UDFModel` subclass defines `save_with_user` to call
+`self.full_clean_with_user`, which is implemented by
+`treemap.audit._PendingAuditable`, and calls `super(...).full_clean(...)`.
+
+That results in django Model's `full_clean`, which calls the model instance
+`clean_fields`, which, today, is only implemented in `UDFModel`.
+It cleans the values in `udfs`, at which point the `udfs` values must
+conform to postgresql hstore requirements:
+-   None, which translates to SQL NULL
+-   string
+
+`order_by`
+----------
 
 `HStoreField` does not implement an ordering transform, see
 https://code.djangoproject.com/ticket/24747
