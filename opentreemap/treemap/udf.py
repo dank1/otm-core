@@ -1166,8 +1166,10 @@ class UDFModel(UserTrackable, models.Model):
                 super(UDFModel.UdfsProxy, self).__setitem__(
                         key, udf.clean_value(val))
                 hstore_attr = getattr(self.instance, self._field_name)
-                if hstore_attr is not None:
-                    hstore_attr[key] = udf.reverse_clean(val)
+                if hstore_attr is None:
+                    hstore_attr = {}
+                    setattr(self.instance, self._field_name, hstore_attr)
+                hstore_attr[key] = udf.reverse_clean(val)
 
         # The automated tests require filling in all the collection methods
 
