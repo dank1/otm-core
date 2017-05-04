@@ -141,13 +141,13 @@ class ScalarUDFFilterTest(OTMTestCase):
         plot_b.geom = p
         plot_b.save_with_user(self.commander_user)
 
-        a_in_poly = Plot.objects.filter(**{'udfs__Test choice': 'a'})\
+        a_in_poly = Plot.objects.filter(**{'hstore_udfs__Test choice': 'a'})\
                                 .filter(geom__contained=poly)
 
         self.assertEqual({plot.pk for plot in a_in_poly},
                          {plot_a.pk, })
 
-        b_in_poly = Plot.objects.filter(**{'udfs__Test choice': 'b'})\
+        b_in_poly = Plot.objects.filter(**{'hstore_udfs__Test choice': 'b'})\
                                 .filter(geom__contained=poly)
 
         self.assertEqual({plot.pk for plot in b_in_poly},
