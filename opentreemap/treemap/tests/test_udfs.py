@@ -1036,7 +1036,7 @@ class CollectionUDFTest(OTMTestCase):
         audits = [a.current_value for a in
                   plot.audits().filter(field='udf:action')]
 
-        self.assertEqual(self._get_udf_actions(plot), {'', 'prune'})
+        self.assertEqual(self._get_udf_actions(plot), {'prune'})
         self.assertEqual(audits, ['prune'])
 
     def test_can_get_and_set(self):
