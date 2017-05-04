@@ -27,7 +27,6 @@ class PolygonalMapFeature(MapFeature):
     def __init__(self, *args, **kwargs):
         super(PolygonalMapFeature, self).__init__(*args, **kwargs)
         self._do_not_track |= self.do_not_track
-        self.populate_previous_state()
 
     @classproperty
     def do_not_track(cls):

@@ -326,6 +326,11 @@ class User(AbstractUniqueEmailUser, Auditable):
     make_info_public = models.BooleanField(default=False)
     allow_email_contact = models.BooleanField(default=False)
 
+    def __init__(self, *args, **kwargs):
+        super(User, self).__init__(*args, **kwargs)
+
+        self.populate_previous_state()
+
     @classmethod
     def system_user(clazz):
         if not User._system_user:
@@ -533,6 +538,8 @@ class InstanceUser(Auditable, models.Model):
     def __init__(self, *args, **kwargs):
         super(InstanceUser, self).__init__(*args, **kwargs)
         self._do_not_track |= self.do_not_track
+
+        self.populate_previous_state()
 
     class Meta:
         unique_together = ('instance', 'user',)
@@ -1091,6 +1098,7 @@ class Tree(Convertible, UDFModel, PendingAuditable, ValidationMixin):
 
     def __init__(self, *args, **kwargs):
         super(Tree, self).__init__(*args, **kwargs)
+        self.populate_previous_state()
 
     def dict(self):
         props = self.as_dict()

@@ -1166,7 +1166,8 @@ class UDFModel(UserTrackable, models.Model):
                 super(UDFModel.UdfsProxy, self).__setitem__(
                         key, udf.clean_value(val))
                 hstore_attr = getattr(self.instance, self._field_name)
-                hstore_attr[key] = udf.reverse_clean(val)
+                if hstore_attr is not None:
+                    hstore_attr[key] = udf.reverse_clean(val)
 
         # The automated tests require filling in all the collection methods
 
@@ -1218,11 +1219,11 @@ class UDFModel(UserTrackable, models.Model):
         hstore_udfs_kwarg = copy.deepcopy(kwargs.get('hstore_udfs', {}))
         hstore_udfs_kwarg.update(udfs_kwarg)
 
+        super(UDFModel, self).__init__(*args, **kwargs)
+
         # Need to setup the udfs attribute before `UserTrackable` init
         self.udfs = UDFModel.UdfsProxy(self, 'hstore_udfs',
                                        **hstore_udfs_kwarg)
-
-        super(UDFModel, self).__init__(*args, **kwargs)
 
         # Collection UDF audits are handled by the
         # UserDefinedCollectionValue class
@@ -1231,7 +1232,10 @@ class UDFModel(UserTrackable, models.Model):
         # This is the whole reason for keeping _do_not_track
         # in addition to the do_not_track class property.
         self._do_not_track |= self.do_not_track | self._collection_field_names
-        self.populate_previous_state()
+
+        # It is the leaf class' responsibility to call
+        # `self.populate_previous_state()` after initialization is
+        # otherwise complete.
 
         self.dirty_collection_udfs = set()
 

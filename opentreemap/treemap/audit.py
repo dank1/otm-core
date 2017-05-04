@@ -541,7 +541,10 @@ class UserTrackable(Dictable):
         # with any fields that are added during instance initialization.
         self._do_not_track = self.do_not_track
         super(UserTrackable, self).__init__(*args, **kwargs)
-        self.populate_previous_state()
+
+        # It is the leaf class' responsibility to call
+        # `self.populate_previous_state()` after initialization is
+        # otherwise complete.
 
     def apply_change(self, key, orig_value):
         # TODO: if a field has a default value, don't
