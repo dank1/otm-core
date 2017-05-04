@@ -116,13 +116,13 @@ class ScalarUDFFilterTest(OTMTestCase):
         self.choice_c = create_and_save_with_choice('c', n=7)
 
     def test_filtering_on_string_and_choice_using_count(self):
-        plots = Plot.objects.filter(**{'udfs__Test choice': 'a'})
+        plots = Plot.objects.filter(**{'hstore_udfs__Test choice': 'a'})
         self.assertEqual(
             len(self.choice_a),
             plots.count())
 
     def test_filtering_on_value_works(self):
-        plots = Plot.objects.filter(**{'udfs__Test choice': 'b'})
+        plots = Plot.objects.filter(**{'hstore_udfs__Test choice': 'b'})
         self.assertEqual(
             self.choice_b,
             {plot.pk for plot in plots})
@@ -166,7 +166,7 @@ class ScalarUDFFilterTest(OTMTestCase):
             return {plot.pk
                     for plot
                     in Plot.objects.filter(
-                        **{'udfs__Test string' + sfx: val})}
+                        **{'hstore_udfs__Test string' + sfx: val})}
 
         self.assertEqual(set(), run('', 'also'))
 
@@ -204,7 +204,7 @@ class ScalarUDFFilterTest(OTMTestCase):
 
     def test_has_key(self):
         dates = self._setup_dates()
-        plots = Plot.objects.filter(**{'udfs__has_key': 'Test date'})
+        plots = Plot.objects.filter(**{'hstore_udfs__has_key': 'Test date'})
         self.assertEqual(len(plots), len(dates))
 
     def test_integer_gt_and_lte_constraints(self):
@@ -217,7 +217,7 @@ class ScalarUDFFilterTest(OTMTestCase):
         for i in xrange(0, 7):
             create_plot_with_num(i)
 
-        plots = Plot.objects.filter(**{'udfs__Test int__gt': 2,
+        plots = Plot.objects.filter(**{'hstore_udfs__Test int__gt': 2,
                                        'udfs__Test int__lte': 4})
         self.assertEqual(len(plots), 2)
 
@@ -232,14 +232,14 @@ class ScalarUDFFilterTest(OTMTestCase):
         for i in xrange(10, 30):
             create_plot_with_num(float(i)/10.0)
 
-        plots = Plot.objects.filter(**{'udfs__Test float__gt': 1.5,
+        plots = Plot.objects.filter(**{'hstore_udfs__Test float__gt': 1.5,
                                        'udfs__Test float__lte': 2.0})
 
         self.assertEqual(len(plots), 5)  # 1.6, 1.7, 1.8, 1.9, 2.0
 
     def test_using_q_objects(self):
-        qb = Q(**{'udfs__Test choice': 'b'})
-        qc = Q(**{'udfs__Test choice': 'c'})
+        qb = Q(**{'hstore_udfs__Test choice': 'b'})
+        qc = Q(**{'hstore_udfs__Test choice': 'c'})
 
         q = qb | qc
 
