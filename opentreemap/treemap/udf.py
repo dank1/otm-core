@@ -11,76 +11,7 @@ Entry points:
 -   `UserDefinedCollectionValue`, an HStore collection value for a
     specific `UserDefinedFieldDefinition` on a specific model instance
 
-Guts (tl;dr):
-
-`HStoreField udfs` vs. `UDFDictionary` via `UDFDescriptor`
-----------------------------------------------------------
-
-NOTE: all this is about to change.
-`udfs` becomes an ordinary model instance attribute,
-and `hstore_udfs` corresponds to the `udfs` column.
-See `UdfsProxy` inside `UDFModel`.
-
-`UDFModel` provides a model with a `udfs` field that corresponds to
-a `udfs` column in the db table for the model.
-
-`udfs` is a gateway to both scalar and collection custom fields.
-
-If we only had scalar custom fields, `udfs` could be a
-`django.contrib.postgres.fields.HStoreField`, but collections are too
-complicated to store in the `udfs` HStore.
-
-During model instance initialization, django replaces `HStoreField` fields
-with ordinary `dict` instances, populated with the HStore content
-from the `udfs` column.
-
-`udfs` can't be an ordinary `dict` instance because it has to also
-act as a gateway to collection custom fields,
-so we subclass `HStoreField` as `UDFField` and perform magic
-consisting of the trio, (`UDFField`, `UDFDescriptor`, `UDFDictionary`)
-to replace with a `UDFDictionary` instead of a plain `dict`.
-`UDFDictionary` knows how to handle collections.
-
-The `UDFField` does this by supplying a `contribute_to_class` method,
-which acts as `setattr` on the model class to tell it to replace
-the `UDFField` with a `UDFDescriptor`, which has `__get__` and `__set__`
-which substitute a `UDFDictionary` based on the `dict` supplied by django
-for the `HStoreField`, with the additional collection feature.
-
-In the app, django supplies a `dict` for `UDFDescriptor` to build the
-`UDFDictionary`, but in tests, django usually supplies `None`.
-
-Model Retrieval vs. `udfs`
---------------------------
-
-Model loading has a hook `from_db`, which we can consider using
-to do a better job of loading the `udfs` model instance attribute.
-https://docs.djangoproject.com/en/1.8/ref/models/instances/
-    #customizing-model-loading
-`def from_db(cls, db, field_names, values)`
-One can create the model instance via
-`cls(**zip(field_names, values))` in the default case.
-
-Ideally, `udfs` would then be pre-loaded with values for the keys
-in native Python form, including numbers and `multichoice` lists.
-
-Model Save vs. `udfs`
----------------------
-
-`UDFModel` merely inherits from `UserTrackable`, but today,
-all `UDFModel` subclasses also subclass `treemap.audit.PendingAuditable`,
-which subclasses `treemap.audit._PendingAuditable`.
-
-Also, every existing `UDFModel` subclass defines `save_with_user` to call
-`self.full_clean_with_user`, which is implemented by
-`treemap.audit._PendingAuditable`, and calls `super(...).full_clean(...)`.
-
-That results in django Model's `full_clean`, which calls the model instance
-`clean_fields`, which, today, is only implemented in `UDFModel`.
-It cleans the values in `udfs`, at which point the `udfs` values must
-conform to postgresql hstore requirements:
--   None, which translates to SQL NULL
--   string
+Notes (tl;dr):
 
 `order_by`
 ----------
@@ -100,13 +31,15 @@ import json
 import copy
 import re
 from datetime import date, datetime
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.utils import six
+from django.utils.encoding import force_text
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.gis.db import models
 from django.db import transaction
 from django.db.models import Q
-from django.db.models.fields.subclassing import Creator
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save, post_delete
 
@@ -120,6 +53,7 @@ from treemap.lib.object_caches import (field_permissions,
                                        invalidate_adjuncts, udf_defs)
 from treemap.lib.dates import (parse_date_string_with_or_without_time,
                                DATETIME_FORMAT)
+from treemap.util import get_name_from_canonical_name
 # Import utilities for ways in which a UserDefinedFieldDefinition
 # is identified
 # They have to be defined in `util` to avoid cyclical
@@ -136,6 +70,13 @@ from treemap.decorators import classproperty
 
 
 UDF_RESERVED_NAMES = set(HStoreField.class_lookups.keys())
+
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return json.JSONEncoder.default(self, obj)
 
 
 class UDFInitializationException(Exception):
@@ -629,7 +570,9 @@ class UserDefinedFieldDefinition(models.Model):
                 # without dropping into raw SQL.
                 for val in vals:
                     val.data[name] = new_choice_value
-                    val.save_with_user(None)
+                    # We call save_base here because we do not want to create
+                    # an "Update" audit.
+                    val.save_base()
 
             audits = Audit.objects.filter(
                 model=self.collection_audit_name,
@@ -876,15 +819,14 @@ class UserDefinedFieldDefinition(models.Model):
         return datatypes
 
     def reverse_clean(self, value):
-        if self.datatype_dict['type'] == 'multichoice':
-            if value and len(value) > 0:
-                value = json.dumps(value, ensure_ascii=False)
-            else:
-                value = None  # so "missing data" searches will work
-        if value is not None:
-            return value if isinstance(value, unicode) else str(value)
+        if isinstance(value, bool):
+            return force_text(value).lower()
+        elif isinstance(value, six.integer_types + (float, Decimal)):
+            return force_text(value)
+        elif isinstance(value, (list, dict)):
+            return force_text(json.dumps(value, cls=DecimalEncoder))
         else:
-            return None
+            return value
 
     def clean_value(self, value, datatype_dict=None):
         """
@@ -951,7 +893,10 @@ class UserDefinedFieldDefinition(models.Model):
                 return value
             else:  # 'multichoice'
                 try:
-                    values = json.loads(value)
+                    if isinstance(value, (dict, list)):
+                        values = value
+                    else:
+                        values = json.loads(value)
                 except ValueError:
                     raise ValidationError(
                         _('%(fieldname)s must be valid JSON') %
@@ -1013,230 +958,11 @@ post_save.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 post_delete.connect(invalidate_adjuncts, sender=UserDefinedFieldDefinition)
 
 
-class UDFDictionary(dict):
-    '''
-    UDFDictionary requires a handle on the model instance in order to
-    lookup collection UDFs.
-    '''
-
-    def __init__(self, value, field, obj=None, *args, **kwargs):
-        if obj is None:
-            raise UDFInitializationException(
-                'UDFField {} was initialized without a model instance'
-                .format(field.name))
-        super(UDFDictionary, self).__init__(value)
-        self.instance = obj
-
-        self._collection_fields = None
-
-    @property
-    def collection_data_loaded(self):
-        return self._collection_fields is not None
-
-    @property
-    def collection_fields(self):
-        """
-        Lazy loading of collection fields
-        """
-        return self._base_collection_fields(clean=True)
-
-    def force_reload_of_collection_fields(self):
-        self._collection_fields = None
-
-    def _base_collection_fields(self, clean):
-
-        if self._collection_fields is None:
-            collections_on_model = [
-                udfd for udfd in self.instance.get_user_defined_fields()
-                if udfd.iscollection]
-
-            self._collection_fields = {
-                udfd.name: [] for udfd in collections_on_model}
-
-            values = UserDefinedCollectionValue.objects.filter(
-                model_id=self.instance.pk,
-                field_definition__in=collections_on_model)
-
-            for value in values:
-                if clean:
-                    data = value.get_cleaned_data()
-                else:
-                    data = value.data
-                    data['id'] = value.pk
-
-                name = value.field_definition.name
-
-                self._collection_fields[name].append(data)
-
-        return self._collection_fields
-
-    def _get_udf_or_error(self, key):
-        for field in self.instance.get_user_defined_fields():
-            if field.name == key:
-                return field
-
-        raise KeyError("Couldn't find UDF for field '%s'" % key)
-
-    def __contains__(self, key):
-        return key in [field.name for field
-                       in self.instance.get_user_defined_fields()]
-
-    def __getitem__(self, key, clean=True):
-        udf = self._get_udf_or_error(key)
-
-        if udf.iscollection:
-            return self.collection_fields.get(key, [])
-        else:
-            if super(UDFDictionary, self).__contains__(key):
-                v = super(UDFDictionary, self).__getitem__(key)
-                try:
-                    return udf.clean_value(v) if clean else v
-                except:
-                    return v
-            else:
-                return None
-
-    def __setitem__(self, key, val):
-        udf = self._get_udf_or_error(key)
-
-        if udf.iscollection:
-            self.instance.dirty_collection_udfs.add(key)
-            # TODO: does this still hold for HStoreField?
-            # HStoreDict cleans values in-place, so we need to do a deep-copy
-            self.collection_fields[key] = copy.deepcopy(val)
-        else:
-            val = udf.reverse_clean(val)
-            super(UDFDictionary, self).__setitem__(key, val)
-
-    # The automated tests require filling in all the collection methods
-
-    def get(self, key, default):
-        try:
-            return self[key]
-        except KeyError:
-            return default
-
-    def has_key(self, key):
-        try:
-            self[key]
-            return True
-        except KeyError:
-            return False
-
-    def iteritems(self, clean=False):
-        for udfd in self.instance.get_user_defined_fields():
-            v = None
-            try:
-                v = self.__getitem__(udfd.name, clean)
-            except KeyError:
-                pass
-            yield udfd.name, v
-
-    def iterkeys(self):
-        for k, v in self.iteritems():
-            yield k
-
-    def itervalues(self, clean=False):
-        for k, v in self.iteritems(clean):
-            yield v
-
-    def items(self, clean=False):
-        return [i for i in self.iteritems(clean)]
-
-    def keys(self):
-        return [k for k in self.iterkeys()]
-
-    def values(self, clean=False):
-        return [v for v in self.itervalues(clean)]
+# Necessary for the sake of past migrations
+UDFField = HStoreField
 
 
-class UDFStubDictionary(dict):
-    '''
-    `UDFDictionary ` requires a handle on the model instance in order to
-    lookup collection UDFs.
-
-    Sometimes `UDFDictionary ` specific properties need to be accessed before
-    the `UDFDescriptor` can be called with the model instance.
-
-    In that special case, use `UDFStubDictionary`, which has the same interface
-    as `UDFDictionary`, but all stubbed.
-    '''
-    @property
-    def collection_data_loaded(self):
-        return False
-
-    @property
-    def collection_fields(self):
-        """
-        Lazy loading of collection fields
-        """
-        return self._base_collection_fields(clean=True)
-
-    def _get_udf_or_error(self, key):
-        raise KeyError("Couldn't find UDF for field '%s'" % key)
-
-    def _base_collection_fields(self, clean):
-        return {}
-
-    def force_reload_of_collection_fields(self):
-        pass
-
-
-class UDFDescriptor(Creator):
-    def __get__(self, obj, type=None):
-        if obj is None:
-            print('UDFDescriptor get called with no model obj')
-            return None
-        obj_name = obj.__class__.__name__
-        udf_dict = obj.__dict__[self.field.name]
-        if udf_dict is None:
-            # This should never happen, but it seems to happen in tests.
-            udf_dict = UDFStubDictionary()
-        if not isinstance(udf_dict, dict):
-            raise UDFInitializationException(
-                '{}.{} is a {}, but should be a dict'.format(
-                    obj_name, self.field.name, type(udf_dict)))
-        if not isinstance(udf_dict, UDFDictionary):
-            print('UDFDescriptor get found {} before set on {}'.format(
-                hex(id(udf_dict)), hex(id(obj))))
-
-        return udf_dict
-
-    def __set__(self, obj, value):
-        value = self.field.to_python(value)
-        # The app supplies a `dict` value, but the tests supply `None`.
-        udf_dict = value if isinstance(value, dict) else {}
-        field_data = UDFDictionary(value=udf_dict, field=self.field, obj=obj)
-        # setattr goes into infinite recursion, so fish in `__dict__`
-        obj.__dict__[self.field.name] = field_data
-
-
-class UDFField(HStoreField):
-    '''
-    UDFField(HStoreField)
-
-    `django.contrib.postgres.fields.HStoreField`
-    has magic that replaces it with an ordinary `dict`,
-    probably in its `contribute_to_class`.
-    '''
-    # Overridden to convert dict values to UDFDictionary values
-    def get_default(self):
-        hstore_dict = super(UDFField, self).get_default()
-        return self.get_prep_value(hstore_dict)
-
-    # Overridden to convert dict values to UDFDictionary values
-    def get_prep_value(self, value):
-        if isinstance(value, dict) and not isinstance(value, UDFDictionary):
-            return UDFStubDictionary(value)
-        else:
-            return value
-
-    # Overridden to convert model-instance udfs field to UDFDescriptor
-    def contribute_to_class(self, cls, name):
-        super(UDFField, self).contribute_to_class(cls, name)
-        setattr(cls, self.name, UDFDescriptor(self))
-
-
+# UDFProxy and UDFModelBase are necessary for audits
 class _UDFProxy(UDFField):
     def __init__(self, name, *args, **kwargs):
         super(_UDFProxy, self).__init__(*args, **kwargs)
@@ -1259,8 +985,8 @@ class UDFModelBase(ModelBase):
                 return orig(name)
             except Exception:
                 if name.startswith('udf:'):
-                    udf, udfname = name.split(':', 1)
-                    field, model, direct, m2m = orig('udfs')
+                    udfname = get_name_from_canonical_name(name)
+                    field, model, direct, m2m = orig('hstore_udfs')
                     field = _UDFProxy(udfname)
                     return (field, model, direct, m2m)
                 else:
@@ -1282,9 +1008,10 @@ class UDFModel(UserTrackable, models.Model):
 
     __metaclass__ = UDFModelBase
 
-    hstore_udfs = HStoreField(
+    hstore_udfs = UDFField(
         db_index=True,
         blank=True,
+        null=True,
         db_column='udfs')
 
     class Meta:
@@ -1316,48 +1043,186 @@ class UDFModel(UserTrackable, models.Model):
         CLEAN = 1
         DIRTY = 2
 
-        def __init__(self, obj,
-                     *args, **kwargs):
-            super(UDFModel.UdfsProxy, self).__init__(*args, **kwargs)
-            self._obj = obj
+        def __init__(self, obj, hstore_field_name, **kwargs):
+            super(UDFModel.UdfsProxy, self).__init__(**kwargs)
+            self.instance = obj
+            self._field_name = hstore_field_name
             self._model_type = obj.__class__.__name__
             self._status = self.UNLOADED
+            self._collection_fields = None
             if 0 < len(kwargs):
                 for k, v in kwargs.iteritems():
                     self[k] = self.convert(k, v)
 
+            self._update_instance_properties()
+
         def convert(self, k, v):
-            udfds = [d for d in self._obj.get_user_defined_fields()
+            udfds = [d for d in self.instance.get_user_defined_fields()
                      if d.name == k and d.model_type == self._model_type]
             if 1 != len(udfds):
                 raise ValidationError(
                     'udf:{} is not a valid field'.format(k))
             udfd = udfds[0]
-            self[k] = self.convert_value(udfd, v)
+            self[k] = udfd.clean_value(v)
 
-        def convert_value(self, udfd, v):
-            if udfd.iscollection:
-                self.convert_collection_value(udfd, v)
+        @property
+        def collection_data_loaded(self):
+            return self._collection_fields is not None
+
+        @property
+        def collection_fields(self):
+            """
+            Lazy loading of collection fields
+            """
+            return self._base_collection_fields()
+
+        def force_reload_of_collection_fields(self):
+            self._collection_fields = None
+
+        def _base_collection_fields(self, clean=True):
+
+            if self._collection_fields is None:
+                collections_on_model = [
+                    udfd for udfd in self.instance.get_user_defined_fields()
+                    if udfd.iscollection]
+
+                self._collection_fields = {
+                    udfd.name: [] for udfd in collections_on_model}
+
+                values = UserDefinedCollectionValue.objects.filter(
+                    model_id=self.instance.pk,
+                    field_definition__in=collections_on_model)
+
+                for value in values:
+                    if clean:
+                        data = value.get_cleaned_data()
+                    else:
+                        data = value.data
+                        data['id'] = value.pk
+
+                    name = value.field_definition.name
+
+                    self._collection_fields[name].append(data)
+
+            return self._collection_fields
+
+        def _get_udf_or_error(self, key):
+            for field in self.instance.get_user_defined_fields():
+                if field.name == key:
+                    return field
+
+            raise KeyError("Couldn't find UDF for field '%s'" % key)
+
+        def _make_instance_property(self, key):
+            def get_key(instance):
+                return self.get(key, None)
+
+            def set_key(instance, value):
+                self[key] = value
+
+            return property(get_key, set_key)
+
+        def _add_property_to_instance(self, key):
+            setattr(self.instance, self._prefixed_name(key),
+                    self._make_instance_property(key))
+
+        def _update_instance_properties(self):
+            for udfd in self.instance.get_user_defined_fields():
+                key = udfd.name
+                if not hasattr(self.instance, self._prefixed_name(key)):
+                    self._add_property_to_instance(key)
+
+        def _prefixed_name(self, key):
+            return 'udf:' + key
+
+        def __contains__(self, key):
+            return key in [field.name for field
+                           in self.instance.get_user_defined_fields()]
+
+        def __getitem__(self, key):
+            self._update_instance_properties()
+            udf = self._get_udf_or_error(key)
+
+            if udf.iscollection:
+                return self.collection_fields.get(key, [])
             else:
-                self.convert_scalar_value(udfd, v)
+                try:
+                    v = super(UDFModel.UdfsProxy, self).__getitem__(key)
+                    return v
+                except KeyError:
+                    return None
 
-        def convert_collection_value(self, udfd, v):
-            pass
+        def __setitem__(self, key, val):
+            self._update_instance_properties()
+            udf = self._get_udf_or_error(key)
 
-        def convert_scalar_value(self, udfd, v):
-            pass
+            if udf.iscollection:
+                self.instance.dirty_collection_udfs.add(key)
+                # Don't let the caller update collection-subfields on the fly.
+                # They have to make their change, and then set the value here
+                # again, in order to go through this entrypoint.
+                self.collection_fields[key] = copy.deepcopy(val)
+            else:
+                super(UDFModel.UdfsProxy, self).__setitem__(
+                        key, udf.clean_value(val))
+                hstore_attr = getattr(self.instance, self._field_name)
+                hstore_attr[key] = udf.reverse_clean(val)
+
+        # The automated tests require filling in all the collection methods
+
+        def get(self, key, default):
+            try:
+                return self[key]
+            except KeyError:
+                return default
+
+        def has_key(self, key):
+            try:
+                self[key]
+                return True
+            except KeyError:
+                return False
+
+        def iteritems(self):
+            for udfd in self.instance.get_user_defined_fields():
+                v = None
+                try:
+                    v = self.__getitem__(udfd.name)
+                    if v is not None:
+                        yield udfd.name, v
+                except KeyError:
+                    pass
+
+        def iterkeys(self):
+            for k, v in self.iteritems():
+                yield k
+
+        def itervalues(self):
+            for k, v in self.iteritems():
+                yield v
+
+        def items(self):
+            return [i for i in self.iteritems()]
+
+        def keys(self):
+            return [k for k in self.iterkeys()]
+
+        def values(self):
+            return [v for v in self.itervalues()]
 
     def __init__(self, *args, **kwargs):
         # Model doesn't know anything about `'udfs'`,
         # so take it out before `super`.
         udfs_kwarg = kwargs.pop('udfs', {})
 
-        super(UDFModel, self).__init__(*args, **kwargs)
-
-        hstore_udfs_kwarg = kwargs.get('hstore_udfs', {})
+        hstore_udfs_kwarg = copy.deepcopy(kwargs.get('hstore_udfs', {}))
         hstore_udfs_kwarg.update(udfs_kwarg)
 
-        self.udfs = self.UdfsProxy(self, hstore_udfs_kwarg)
+        # Need to setup the udfs attribute before `UserTrackable` init
+        self.udfs = UDFModel.UdfsProxy(self, 'hstore_udfs',
+                                       **hstore_udfs_kwarg)
+
+        super(UDFModel, self).__init__(*args, **kwargs)
 
         # Collection UDF audits are handled by the
         # UserDefinedCollectionValue class
@@ -1370,13 +1235,9 @@ class UDFModel(UserTrackable, models.Model):
 
         self.dirty_collection_udfs = set()
 
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        pass
-
     @classproperty
     def do_not_track(cls):
-        return UserTrackable.do_not_track | {'udfs'}
+        return UserTrackable.do_not_track | {'udfs', 'hstore_udfs'}
 
     def fields_were_updated(self):
         normal_fields = super(UDFModel, self).fields_were_updated()
@@ -1527,9 +1388,6 @@ class UDFModel(UserTrackable, models.Model):
 
             base_model_dict['udf:' + field_name] = value
 
-        # Torch the "udfs" dictionary
-        del base_model_dict['udfs']
-
         return base_model_dict
 
     def save_with_user(self, user, *args, **kwargs):
@@ -1540,10 +1398,10 @@ class UDFModel(UserTrackable, models.Model):
         # We may need to get a primary key here before we continue
         super(UDFModel, self).save_with_user(user, *args, **kwargs)
 
+        collection_fields = self.udfs._base_collection_fields(clean=False)
         dirty_collection_values = {
             field_name: values
-            for field_name, values in
-            self.udfs._base_collection_fields(clean=False).iteritems()
+            for field_name, values in collection_fields.iteritems()
             if field_name in self.dirty_collection_udfs}
 
         fields = {field.name: field
@@ -1554,19 +1412,12 @@ class UDFModel(UserTrackable, models.Model):
 
             ids_specified = []
             for value_dict in values:
-                kwargs = {'field_definition': field,
-                          'model_id': self.pk}
-                if 'id' in value_dict:
-                    id = value_dict['id']
-                    del value_dict['id']
-
-                    kwargs['pk'] = id
-                    udcv = UserDefinedCollectionValue.objects.get(**kwargs)
-                else:
-                    udcv = UserDefinedCollectionValue(**kwargs)
+                udcv = self._get_collection_value(field, value_dict)
 
                 if udcv.data != value_dict:
-                    udcv.data = value_dict
+                    udcv.data = {
+                        key: field.reverse_clean(val)
+                        for key, val in value_dict.items()}
                     udcv.save_with_user(user)
 
                 ids_specified.append(udcv.pk)
@@ -1581,6 +1432,18 @@ class UDFModel(UserTrackable, models.Model):
         self.udfs.force_reload_of_collection_fields()
 
         self.dirty_collection_udfs = set()
+
+    def _get_collection_value(self, field, value_dict):
+        kwargs = {'field_definition': field,
+                  'model_id': self.pk}
+        if 'id' in value_dict:
+            id = value_dict['id']
+            del value_dict['id']
+
+            kwargs['pk'] = id
+            return UserDefinedCollectionValue.objects.get(**kwargs)
+        else:
+            return UserDefinedCollectionValue(**kwargs)
 
     def clean_udfs(self):
         scalar_fields = {field.name: field
@@ -1640,3 +1503,7 @@ class UDFModel(UserTrackable, models.Model):
 
 
 UDF_LOOKUP_PATTERN = re.compile(r'(.*?__)?udf\:(.+?)(__[a-zA-z]+)?$')
+
+
+# Necessary for the sake of past migrations
+UDFDictionary = UDFModel.UdfsProxy  # NOQA
