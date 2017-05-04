@@ -8,6 +8,8 @@ from random import shuffle
 from datetime import datetime
 import psycopg2
 
+from unittest.case import skip
+
 from django.db import connection
 from django.db.models import Q
 from django.core.exceptions import ValidationError
@@ -207,6 +209,7 @@ class ScalarUDFFilterTest(OTMTestCase):
         plots = Plot.objects.filter(**{'hstore_udfs__has_key': 'Test date'})
         self.assertEqual(len(plots), len(dates))
 
+    @skip('HStoreField cannot do numeric comparison lookup')
     def test_integer_gt_and_lte_constraints(self):
         def create_plot_with_num(anint):
             plot = Plot(geom=self.p, instance=self.instance)
@@ -214,13 +217,21 @@ class ScalarUDFFilterTest(OTMTestCase):
             plot.save_with_user(self.commander_user)
             return plot
 
-        for i in xrange(0, 7):
-            create_plot_with_num(i)
+        # in range
+        create_plot_with_num(21)
+        create_plot_with_num(50)
+        # out of range numerically, but in range lexically
+        create_plot_with_num(3)
+        create_plot_with_num(300)
+        # out of range either way
+        create_plot_with_num(2)
+        create_plot_with_num(20)
 
-        plots = Plot.objects.filter(**{'hstore_udfs__Test int__gt': 2,
-                                       'udfs__Test int__lte': 4})
+        plots = Plot.objects.filter(**{'hstore_udfs__Test int__gt': 20,
+                                       'hstore_udfs__Test int__lte': 50})
         self.assertEqual(len(plots), 2)
 
+    @skip('HStoreField cannot do numeric comparison lookup')
     def test_float_gt_and_lte_constraints(self):
         def create_plot_with_num(afloat):
             plot = Plot(geom=self.p, instance=self.instance)
@@ -228,14 +239,20 @@ class ScalarUDFFilterTest(OTMTestCase):
             plot.save_with_user(self.commander_user)
             return plot
 
-        # creates 1.0 through 3.0 moving by tenths
-        for i in xrange(10, 30):
-            create_plot_with_num(float(i)/10.0)
+        # in range
+        create_plot_with_num(20.6)
+        create_plot_with_num(50.0)
+        # out of range numerically, but in range lexically
+        create_plot_with_num(3.1)
+        create_plot_with_num(300.1)
+        # out of range either way
+        create_plot_with_num(2.5)
+        create_plot_with_num(20.5)
 
-        plots = Plot.objects.filter(**{'hstore_udfs__Test float__gt': 1.5,
-                                       'udfs__Test float__lte': 2.0})
+        plots = Plot.objects.filter(**{'hstore_udfs__Test float__gt': 20.5,
+                                       'hstore_udfs__Test float__lte': 50.0})
 
-        self.assertEqual(len(plots), 5)  # 1.6, 1.7, 1.8, 1.9, 2.0
+        self.assertEqual(len(plots), 2)
 
     def test_using_q_objects(self):
         qb = Q(**{'hstore_udfs__Test choice': 'b'})
