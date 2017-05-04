@@ -1394,7 +1394,7 @@ class Audit(models.Model):
 
         cls = get_auditable_class(self.model)
         field_query = cls._meta.get_field_by_name(self.field)
-        field_cls, fk_model_cls, is_local, m2m = field_query
+        field_cls, __, __, __ = field_query
         field_modified_value = field_cls.to_python(value)
 
         # handle edge cases
