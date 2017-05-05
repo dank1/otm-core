@@ -228,4 +228,4 @@ def make_udf_name_from_key(key):
 
 
 def make_udf_lookup_from_key(key):
-    return 'udfs__{}'.format(key)
+    return 'hstore_udfs__{}'.format(key)
