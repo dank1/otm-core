@@ -1010,7 +1010,7 @@ class UDFModel(UserTrackable, models.Model):
     hstore_udfs = UDFField(
         db_index=True,
         blank=True,
-        null=True,
+        default='',
         db_column='udfs')
 
     class Meta:
