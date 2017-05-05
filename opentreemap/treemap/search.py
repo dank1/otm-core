@@ -325,7 +325,7 @@ def _lookup_key(prefix, field, lookup_name=''):
     return a string lookup key.
     '''
     if _is_udf(field):
-        field = _lookup_key('udfs__', field[4:])
+        field = _lookup_key('hstore_udfs__', field[4:])
     return '{}{}{}'.format(prefix, field, lookup_name)
 
 

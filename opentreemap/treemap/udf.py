@@ -53,7 +53,6 @@ from treemap.lib.object_caches import (field_permissions,
                                        invalidate_adjuncts, udf_defs)
 from treemap.lib.dates import (parse_date_string_with_or_without_time,
                                DATETIME_FORMAT)
-from treemap.util import get_name_from_canonical_name
 # Import utilities for ways in which a UserDefinedFieldDefinition
 # is identified
 # They have to be defined in `util` to avoid cyclical
@@ -751,7 +750,7 @@ class UserDefinedFieldDefinition(models.Model):
             objects_with_udf_data = (Model
                                      .objects
                                      .filter(instance=self.instance)
-                                     .filter(udfs__has_key=self.name))
+                                     .filter(hstore_udfs__has_key=self.name))
 
             for obj in objects_with_udf_data:
                 del obj.udfs[self.name]
