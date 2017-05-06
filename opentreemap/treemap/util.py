@@ -9,6 +9,7 @@ from collections import OrderedDict
 from urlparse import urlparse
 
 from django.apps import apps
+from django.db.models import Func
 from django.shortcuts import get_object_or_404, resolve_url
 from django.http import HttpResponse
 from django.utils.encoding import force_str
@@ -211,6 +212,8 @@ def can_read_as_super_admin(request):
         return request.user.is_super_admin() and request.method == 'GET'
 
 
+# UDF utilitites
+
 # Utilities for ways in which a UserDefinedFieldDefinition is identified.
 # Please also see name related properties on that class.
 # Note that audits refer to collection udfds as 'udf:{udfd.pk}',
@@ -229,3 +232,16 @@ def make_udf_name_from_key(key):
 
 def make_udf_lookup_from_key(key):
     return 'hstore_udfs__{}'.format(key)
+
+
+class TypedExpression(Func):
+    template = r"(%(expression)s)::%(type)s"
+
+
+class TypedUdf(Func):
+    template = r"(%(udfs)s -> '%(fieldname)s')::%(type)s"
+
+
+class UdfOperator(Func):
+    template = (r"(%(udfs)s -> '%(fieldname)s')::%(type)s %(op)s "
+                r"(%(expression)s)::%(type)s")
