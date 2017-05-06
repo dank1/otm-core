@@ -209,8 +209,21 @@ class ScalarUDFFilterTest(OTMTestCase):
         plots = Plot.objects.filter(**{'hstore_udfs__has_key': 'Test date'})
         self.assertEqual(len(plots), len(dates))
 
-    @skip('HStoreField cannot do numeric comparison lookup')
+    @skip('Get a filter working in the shell first')
     def test_integer_gt_and_lte_constraints(self):
+        '''
+        The straightforward test
+        plots = Plot.objects.filter(**{'hstore_udfs__Test int__gt': 20,
+                                       'hstore_udfs__Test int__lte': 50})
+        fails because it does a lexical comparison, not numerical.
+
+        `HStoreField` lacks the magic to fix it,
+        so we have to fix it ourselves using django `annotate`.
+
+        We need SQL that looks something like this:
+        ...`WHERE (treemap_mapfeature.udfs -> '%(fieldname)s')::int
+            > $(criteria)s::int`
+        '''
         def create_plot_with_num(anint):
             plot = Plot(geom=self.p, instance=self.instance)
             plot.udfs['Test int'] = anint
@@ -231,8 +244,21 @@ class ScalarUDFFilterTest(OTMTestCase):
                                        'hstore_udfs__Test int__lte': 50})
         self.assertEqual(len(plots), 2)
 
-    @skip('HStoreField cannot do numeric comparison lookup')
+    @skip('Implement when the integer test works')
     def test_float_gt_and_lte_constraints(self):
+        '''
+        The straightforward test
+        plots = Plot.objects.filter(**{'hstore_udfs__Test float__gt': 20.5,
+                                       'hstore_udfs__Test float__lte': 50.0})
+        fails because it does a lexical comparison, not numerical.
+
+        `HStoreField` lacks the magic to fix it,
+        so we have to fix it ourselves using django `annotate`.
+
+        We need SQL that looks something like this:
+        ...`WHERE (treemap_mapfeature.udfs -> '%(fieldname)s')::float
+            > $(criteria)s::float`
+        '''
         def create_plot_with_num(afloat):
             plot = Plot(geom=self.p, instance=self.instance)
             plot.udfs['Test float'] = afloat
