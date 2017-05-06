@@ -1038,31 +1038,18 @@ class UDFModel(UserTrackable, models.Model):
         UdfsProxy(obj, *args, **kwargs)
         obj is a reference to the model instance.
         '''
-        UNLOADED = 0
-        CLEAN = 1
-        DIRTY = 2
 
         def __init__(self, obj, hstore_field_name, **kwargs):
             super(UDFModel.UdfsProxy, self).__init__(**kwargs)
             self.instance = obj
             self._field_name = hstore_field_name
             self._model_type = obj.__class__.__name__
-            self._status = self.UNLOADED
             self._collection_fields = None
             if 0 < len(kwargs):
                 for k, v in kwargs.iteritems():
-                    self[k] = self.convert(k, v)
+                    self[k] = v
 
             self._update_instance_properties()
-
-        def convert(self, k, v):
-            udfds = [d for d in self.instance.get_user_defined_fields()
-                     if d.name == k and d.model_type == self._model_type]
-            if 1 != len(udfds):
-                raise ValidationError(
-                    'udf:{} is not a valid field'.format(k))
-            udfd = udfds[0]
-            self[k] = udfd.clean_value(v)
 
         @property
         def collection_data_loaded(self):
@@ -1153,6 +1140,7 @@ class UDFModel(UserTrackable, models.Model):
 
         def __setitem__(self, key, val):
             self._update_instance_properties()
+
             udf = self._get_udf_or_error(key)
 
             if udf.iscollection:
@@ -1162,13 +1150,17 @@ class UDFModel(UserTrackable, models.Model):
                 # again, in order to go through this entrypoint.
                 self.collection_fields[key] = copy.deepcopy(val)
             else:
+                cleaned_value = udf.clean_value(val)
+                hstore_value = udf.reverse_clean(val)
+
                 super(UDFModel.UdfsProxy, self).__setitem__(
-                        key, udf.clean_value(val))
+                        key, cleaned_value)
+
                 hstore_attr = getattr(self.instance, self._field_name)
                 if hstore_attr is None:
                     hstore_attr = {}
                     setattr(self.instance, self._field_name, hstore_attr)
-                hstore_attr[key] = udf.reverse_clean(val)
+                hstore_attr[key] = hstore_value
 
         # The automated tests require filling in all the collection methods
 
@@ -1218,13 +1210,11 @@ class UDFModel(UserTrackable, models.Model):
         udfs_kwarg = kwargs.pop('udfs', {})
 
         hstore_udfs_kwarg = copy.deepcopy(kwargs.get('hstore_udfs', {}))
-        hstore_udfs_kwarg.update(udfs_kwarg)
 
         super(UDFModel, self).__init__(*args, **kwargs)
 
         # Need to setup the udfs attribute before `UserTrackable` init
-        self.udfs = UDFModel.UdfsProxy(self, 'hstore_udfs',
-                                       **hstore_udfs_kwarg)
+        self._setup_udfs(udfs_kwarg, hstore_udfs_kwarg)
 
         # Collection UDF audits are handled by the
         # UserDefinedCollectionValue class
@@ -1239,6 +1229,27 @@ class UDFModel(UserTrackable, models.Model):
         # otherwise complete.
 
         self.dirty_collection_udfs = set()
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        '''
+        Assure that
+        1) model retrieval goes through `init`, which it appears not to
+           do by default, and
+        2) it passes values to `init` by keyword rather than args,
+           contrary to documentation in
+           https://docs.djangoproject.com/en/1.8/ref/models/instances/
+        '''
+        # Try to force django to call __init__ with keyword args
+        cls._deferred = True
+        instance = super(UDFModel, cls).from_db(db, field_names, values)
+        return instance
+
+    def _setup_udfs(self, udfs={}, hstore_udfs={}):
+        hstore_udfs_kwarg = copy.deepcopy(hstore_udfs)
+        hstore_udfs_kwarg.update(udfs)
+        self.udfs = UDFModel.UdfsProxy(self, 'hstore_udfs',
+                                       **hstore_udfs_kwarg)
 
     @classproperty
     def do_not_track(cls):
