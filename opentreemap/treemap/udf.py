@@ -1043,7 +1043,8 @@ class UDFModel(UserTrackable, models.Model):
             super(UDFModel.UdfsProxy, self).__init__(**kwargs)
             self.instance = obj
             self._field_name = hstore_field_name
-            self._model_type = obj.__class__.__name__
+            self._model_type = getattr(obj, 'feature_type',
+                                       obj.__class__.__name__)
             self._collection_fields = None
             if 0 < len(kwargs):
                 for k, v in kwargs.iteritems():
@@ -1093,7 +1094,8 @@ class UDFModel(UserTrackable, models.Model):
             return self._collection_fields
 
         def _get_udf_or_error(self, key):
-            for field in self.instance.get_user_defined_fields():
+            udfs = self.instance.get_user_defined_fields()
+            for field in udfs:
                 if field.name == key:
                     return field
 
@@ -1262,7 +1264,8 @@ class UDFModel(UserTrackable, models.Model):
 
     def get_user_defined_fields(self):
         if hasattr(self, 'instance'):
-            return udf_defs(self.instance, self._model_name)
+            return udf_defs(self.instance,
+                            getattr(self, 'feature_type', self._model_name))
         else:
             return []
 
