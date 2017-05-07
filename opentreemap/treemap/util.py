@@ -234,14 +234,17 @@ def make_udf_lookup_from_key(key):
     return 'hstore_udfs__{}'.format(key)
 
 
-class TypedExpression(Func):
-    template = r"(%(expression)s)::%(type)s"
-
-
+# Plot.objects.annotate(
+#     udf=TypedUdf(udfs='"treemap_mapfeature"."udfs"',
+#                  fieldname='scalar udf name',
+#                  type='int',
+#                  output_field=IntegerField()))
 class TypedUdf(Func):
     template = r"(%(udfs)s -> '%(fieldname)s')::%(type)s"
 
 
-class UdfOperator(Func):
-    template = (r"(%(udfs)s -> '%(fieldname)s')::%(type)s %(op)s "
-                r"(%(expression)s)::%(type)s")
+# .filter(udf__gt=TypedExpression(Value('25'),
+#                                 type='int',
+#                                 output_field=IntegerField()))
+class TypedExpression(Func):
+    template = r"(%(expressions)s)::%(type)s"
