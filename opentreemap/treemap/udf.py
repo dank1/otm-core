@@ -1067,7 +1067,9 @@ class UDFModel(UserTrackable, models.Model):
             self._name = this_field_name
             self._field_name = hstore_field_name
             self._model_type = getattr(obj, 'feature_type',
-                                       obj.__class__.__name__)
+                                       obj.__class__.__name__) or \
+                obj.__class__.__name__
+
             self._collection_fields = None
             if 0 < len(kwargs):
                 for k, v in kwargs.iteritems():
@@ -1233,11 +1235,9 @@ class UDFModel(UserTrackable, models.Model):
         # so take it out before `super`.
         udfs_kwarg = kwargs.pop('udfs', {})
 
-        hstore_udfs_kwarg = copy.deepcopy(kwargs.get('hstore_udfs', {}))
-
         super(UDFModel, self).__init__(*args, **kwargs)
 
-        # Need to setup the udfs attribute before `UserTrackable` init
+        hstore_udfs_kwarg = copy.deepcopy(getattr(self, 'hstore_udfs', {}))
         self._setup_udfs(udfs_kwarg, hstore_udfs_kwarg)
 
         # Collection UDF audits are handled by the
@@ -1253,21 +1253,6 @@ class UDFModel(UserTrackable, models.Model):
         # otherwise complete.
 
         self.dirty_collection_udfs = set()
-
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        '''
-        Assure that
-        1) model retrieval goes through `init`, which it appears not to
-           do by default, and
-        2) it passes values to `init` by keyword rather than args,
-           contrary to documentation in
-           https://docs.djangoproject.com/en/1.8/ref/models/instances/
-        '''
-        # Try to force django to call __init__ with keyword args
-        cls._deferred = True
-        instance = super(UDFModel, cls).from_db(db, field_names, values)
-        return instance
 
     def _setup_udfs(self, udfs={}, hstore_udfs={}):
         hstore_udfs_kwarg = copy.deepcopy(hstore_udfs)
