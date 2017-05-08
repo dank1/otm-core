@@ -9,7 +9,6 @@ from collections import OrderedDict
 from urlparse import urlparse
 
 from django.apps import apps
-from django.db.models import Func
 from django.shortcuts import get_object_or_404, resolve_url
 from django.http import HttpResponse
 from django.utils.encoding import force_str
@@ -232,19 +231,3 @@ def make_udf_name_from_key(key):
 
 def make_udf_lookup_from_key(key):
     return 'hstore_udfs__{}'.format(key)
-
-
-# Plot.objects.annotate(
-#     udf=TypedUdf(udfs='"treemap_mapfeature"."udfs"',
-#                  fieldname='scalar udf name',
-#                  type='int',
-#                  output_field=IntegerField()))
-class TypedUdf(Func):
-    template = r"(%(udfs)s -> '%(fieldname)s')::%(type)s"
-
-
-# .filter(udf__gt=TypedExpression(Value('25'),
-#                                 type='int',
-#                                 output_field=IntegerField()))
-class TypedExpression(Func):
-    template = r"(%(expressions)s)::%(type)s"

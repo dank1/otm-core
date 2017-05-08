@@ -39,11 +39,12 @@ from django.utils.encoding import force_text
 from django.utils.translation import ugettext_lazy as _
 from django.contrib.gis.db import models
 from django.db import transaction
-from django.db.models import Q, Lookup
+from django.db.models import Q, Transform
 from django.db.models.base import ModelBase
 from django.db.models.signals import post_save, post_delete
 
 from django.contrib.postgres.fields import HStoreField
+from django.contrib.postgres.fields.hstore import KeyTransform
 
 from treemap.instance import Instance
 from treemap.audit import (UserTrackable, Audit, UserTrackingException,
@@ -1031,7 +1032,7 @@ class UDFModel(UserTrackable, models.Model):
     hstore_udfs = UDFField(
         db_index=True,
         blank=True,
-        default='',
+        default={},
         db_column='udfs')
 
     class Meta:
@@ -1177,8 +1178,7 @@ class UDFModel(UserTrackable, models.Model):
                 cleaned_value = udf.clean_value(val)
                 hstore_value = udf.reverse_clean(val)
 
-                super(UDFModel.UdfsProxy, self).__setitem__(
-                        key, cleaned_value)
+                super(UDFModel.UdfsProxy, self).__setitem__(key, cleaned_value)
 
                 hstore_attr = getattr(self.instance, self._field_name)
                 if hstore_attr is None:
@@ -1550,85 +1550,30 @@ UDF_LOOKUP_PATTERN = re.compile(r'(.*?__)?udf\:(.+?)(__[a-zA-z]+)?$')
 UDFDictionary = UDFModel.UdfsProxy  # NOQA
 
 
-# We want to register Lookup extensions on the transform returned by
-# django.contrib.postgres.fields.hstore.KeyTransformFactory
-# for filters like `hstore_udfs__my field name__int_gt`
-# Right now, it appears to only implement `exact` and `contains`.
-
-# That is, `HStoreField` implements `hstore_udfs__my field name__contains`.
-class PostgresTypedLookup(Lookup):
-    '''
-    Abstract base class.
-    Subclass should define operator, e.g. '>'.
-    Should also define sql_type, e.g. 'int'.
-
-    Expect lhs to derive from something like 'hstore_udfs__my field name__',
-    yielding SQL like '"treemap_mapfeature"."udfs" -> 'my field name',
-    and rhs to be a string value that can be parsed into the sql_type.
-    '''
+class PostgresCast(Transform):
     sql_type = 'text'
-    operator = None
+    bilateral = True
 
-    def as_sql(self, qn, connection):
-        lhs, lhs_params = self.process_lhs(qn, connection)
-        rhs, rhs_params = self.process_rhs(qn, connection)
-        params = lhs_params + rhs_params
-        return ('({lhs})::{sql_type} {operator} ({rhs})::{sql_type}'.format(
-            lhs=lhs, sql_type=self.sql_type, operator=self.operator, rhs=rhs),
-            params)
+    def as_sql(self, compiler, connection):
+        lhs, params = compiler.compile(self.lhs)
+        return '(%s)::%s' % (lhs, self.sql_type), params
 
 
-@HStoreField.register_lookup
-class DataIntGt(PostgresTypedLookup):
-    lookup_name = 'int_gt'
+@KeyTransform.register_lookup
+class PostgresInt(PostgresCast):
+    '''
+    The "int" in lookup key
+    hstore_udfs__my field name__int__lt
+    '''
+    lookup_name = 'int'
     sql_type = 'int'
-    operator = 'gt'
 
 
-@HStoreField.register_lookup
-class DataIntGte(PostgresTypedLookup):
-    lookup_name = 'int_gte'
-    sql_type = 'int'
-    operator = 'gte'
-
-
-@HStoreField.register_lookup
-class DataIntLt(PostgresTypedLookup):
-    lookup_name = 'int_lt'
-    sql_type = 'int'
-    operator = 'lt'
-
-
-@HStoreField.register_lookup
-class DataIntLte(PostgresTypedLookup):
-    lookup_name = 'int_lte'
-    sql_type = 'int'
-    operator = 'lte'
-
-
-@HStoreField.register_lookup
-class DataFloatGt(PostgresTypedLookup):
-    lookup_name = 'float_gt'
+@KeyTransform.register_lookup
+class PostgresFloat(PostgresCast):
+    '''
+    The "float" in lookup key
+    hstore_udfs__my field name__float__lt
+    '''
+    lookup_name = 'float'
     sql_type = 'float'
-    operator = 'gt'
-
-
-@HStoreField.register_lookup
-class DataFloatGte(PostgresTypedLookup):
-    lookup_name = 'float_gte'
-    sql_type = 'float'
-    operator = 'gte'
-
-
-@HStoreField.register_lookup
-class DataFloatLt(PostgresTypedLookup):
-    lookup_name = 'float_lt'
-    sql_type = 'float'
-    operator = 'lt'
-
-
-@HStoreField.register_lookup
-class DataFloatLte(PostgresTypedLookup):
-    lookup_name = 'float_lte'
-    sql_type = 'float'
-    operator = 'lte'
