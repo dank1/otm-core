@@ -209,7 +209,6 @@ class ScalarUDFFilterTest(OTMTestCase):
         plots = Plot.objects.filter(**{'hstore_udfs__has_key': 'Test date'})
         self.assertEqual(len(plots), len(dates))
 
-    @skip('Get a filter working in the shell first')
     def test_integer_gt_and_lte_constraints(self):
         '''
         The straightforward test
@@ -240,8 +239,8 @@ class ScalarUDFFilterTest(OTMTestCase):
         create_plot_with_num(2)
         create_plot_with_num(20)
 
-        plots = Plot.objects.filter(**{'hstore_udfs__Test int__gt': 20,
-                                       'hstore_udfs__Test int__lte': 50})
+        plots = Plot.objects.filter(**{'hstore_udfs__Test int__int__gt': 20,
+                                       'hstore_udfs__Test int__int__lte': 50})
         self.assertEqual(len(plots), 2)
 
     @skip('Implement when the integer test works')

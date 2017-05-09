@@ -30,6 +30,7 @@ from __future__ import division
 import json
 import copy
 import re
+from collections import Iterable
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -53,7 +54,7 @@ from treemap.audit import (UserTrackable, Audit, UserTrackingException,
 from treemap.lib.object_caches import (field_permissions,
                                        invalidate_adjuncts, udf_defs)
 from treemap.lib.dates import (parse_date_string_with_or_without_time,
-                               DATETIME_FORMAT)
+                               DATETIME_FORMAT, DATE_FORMAT)
 # Import utilities for ways in which a UserDefinedFieldDefinition
 # is identified
 # They have to be defined in `util` to avoid cyclical
@@ -819,11 +820,25 @@ class UserDefinedFieldDefinition(models.Model):
         return datatypes
 
     def reverse_clean(self, value):
+        datatype = self.datatype_dict['type']
         if isinstance(value, bool):
             return force_text(value).lower()
         elif isinstance(value, six.integer_types + (float, Decimal)):
             return force_text(value)
-        elif isinstance(value, (list, dict)):
+        elif isinstance(value, six.string_types):
+            return value
+        elif isinstance(value, Iterable):
+            if datatype == 'date':
+                fmt = DATE_FORMAT
+                if 6 <= len(value):
+                    fmt = DATETIME_FORMAT
+                    value = value[:6]
+                elif 3 <= len(value):
+                    value = value[:3]
+                else:
+                    value += [0] * (3 - len(value))
+                return datetime.strftime(fmt, *value)
+
             return force_text(json.dumps(value, cls=DecimalEncoder))
         else:
             return value
@@ -1179,6 +1194,11 @@ class UDFModel(UserTrackable, models.Model):
             else:
                 cleaned_value = udf.clean_value(val)
                 hstore_value = udf.reverse_clean(val)
+                from pprint import pformat
+                print('UdfsProxy setitem:\n'
+                      'val: {}\ncleaned: {}\nhstore: {}\n'.format(
+                          pformat(val), pformat(cleaned_value),
+                          pformat(hstore_value)))
 
                 super(UDFModel.UdfsProxy, self).__setitem__(key, cleaned_value)
 
