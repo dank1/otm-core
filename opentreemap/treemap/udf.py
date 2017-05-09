@@ -1100,7 +1100,7 @@ class UDFModel(UserTrackable, models.Model):
     """
 
     __metaclass__ = UDFModelBase
-    udfs = UDFField(db_index=True, blank=True)
+    udfs = UDFField(db_index=True, blank=True, default={})
 
     class Meta:
         abstract = True
