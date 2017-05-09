@@ -292,6 +292,7 @@ UNMANAGED_APPS = (
     'django.contrib.admin',
     'django.contrib.gis',
     'django.contrib.humanize',
+    'django_hstore',  # leave in until hstore update complete
     'django.contrib.postgres',
     'djcelery',
     'url_tools',
