@@ -301,8 +301,9 @@ class ScalarUDFFilterTest(OTMTestCase):
         create_plot_with_num(2.5)
         create_plot_with_num(20.5)
 
-        plots = Plot.objects.filter(**{'hstore_udfs__Test float__gt': 20.5,
-                                       'hstore_udfs__Test float__lte': 50.0})
+        plots = Plot.objects.filter(
+            **{'hstore_udfs__Test float__float__gt': 20.5,
+               'hstore_udfs__Test float__float__lte': 50.0})
 
         self.assertEqual(len(plots), 2)
 
