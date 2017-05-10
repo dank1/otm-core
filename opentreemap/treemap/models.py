@@ -476,6 +476,10 @@ class Species(PendingAuditable, models.Model):
 
     objects = models.GeoManager()
 
+    def __init__(self, *args, **kwargs):
+        super(Species, self).__init__(*args, **kwargs)
+        self.populate_previous_state()
+
     @property
     def display_name(self):
         return "%s [%s]" % (self.common_name, self.scientific_name)
