@@ -821,14 +821,12 @@ class UserDefinedFieldDefinition(models.Model):
 
     def reverse_clean(self, value):
         datatype = self.datatype_dict['type']
-        if isinstance(value, bool):
-            return force_text(value).lower()
-        elif isinstance(value, six.integer_types + (float, Decimal)):
-            return force_text(value)
-        elif isinstance(value, six.string_types):
-            return value
-        elif isinstance(value, Iterable):
-            if datatype == 'date':
+        if datatype == 'date':
+            if isinstance(value, six.string_types):
+                return value
+            elif isinstance(value, datetime):
+                return value.strftime(DATETIME_FORMAT)
+            elif isinstance(value, Iterable):
                 fmt = DATE_FORMAT
                 if 6 <= len(value):
                     fmt = DATETIME_FORMAT
@@ -838,10 +836,17 @@ class UserDefinedFieldDefinition(models.Model):
                 else:
                     value += [0] * (3 - len(value))
                 return datetime.strftime(fmt, *value)
-
+        elif isinstance(value, bool):
+            return force_text(value).lower()
+        elif isinstance(value, six.integer_types + (float, Decimal)):
+            return force_text(value)
+        # Order matters. Strings are Iterable.
+        elif isinstance(value, six.string_types):
+            return value
+        elif isinstance(value, Iterable):
             return force_text(json.dumps(value, cls=DecimalEncoder))
         else:
-            return value
+            return force_text(value)
 
     def clean_value(self, value, datatype_dict=None):
         """
@@ -1194,11 +1199,6 @@ class UDFModel(UserTrackable, models.Model):
             else:
                 cleaned_value = udf.clean_value(val)
                 hstore_value = udf.reverse_clean(val)
-                from pprint import pformat
-                print('UdfsProxy setitem:\n'
-                      'val: {}\ncleaned: {}\nhstore: {}\n'.format(
-                          pformat(val), pformat(cleaned_value),
-                          pformat(hstore_value)))
 
                 super(UDFModel.UdfsProxy, self).__setitem__(key, cleaned_value)
 
