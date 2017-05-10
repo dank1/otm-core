@@ -141,19 +141,20 @@ class ScalarUDFFilterTest(OTMTestCase):
 
     def test_filter_on_multichoice_value_works(self):
         plot = Plot(geom=self.p, instance=self.instance)
-        plot.udfs['Test multichoice'] = 'a'
+        plot.udfs['Test multichoice'] = ['a']
         plot.save_with_user(self.commander_user)
 
         plot = Plot(geom=self.p, instance=self.instance)
-        plot.udfs['Test multichoice'] = 'contains a'
+        plot.udfs['Test multichoice'] = ['contains a']
         plot.save_with_user(self.commander_user)
 
         plot = Plot(geom=self.p, instance=self.instance)
-        plot.udfs['Test multichoice'] = 'also does'
+        plot.udfs['Test multichoice'] = ['also does']
         plot.save_with_user(self.commander_user)
 
+        # Requires the double quotes in order to not find the other two.
         plots_with_a = Plot.objects.filter(
-            **{'hstore_udfs__Test multichoice__contains': 'a'})
+            **{'hstore_udfs__Test multichoice__contains': '"a"'})
         self.assertEqual(plots_with_a.count(), 1)
 
     def test_combine_with_geom(self):
