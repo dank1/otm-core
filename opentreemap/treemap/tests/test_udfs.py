@@ -8,8 +8,6 @@ from random import shuffle
 from datetime import datetime
 import psycopg2
 
-from unittest.case import skip
-
 from django.db import connection
 from django.db.models import Q
 from django.core.exceptions import ValidationError
@@ -100,6 +98,18 @@ class ScalarUDFFilterTest(OTMTestCase):
             iscollection=False,
             name='Test float')
 
+        UserDefinedFieldDefinition.objects.create(
+            instance=self.instance,
+            model_type='Plot',
+            datatype=json.dumps({
+                'type': 'multichoice',
+                'choices': [
+                    'a',
+                    'contains a',
+                    'also does']}),
+            iscollection=False,
+            name='Test multichoice')
+
         self.plot = Plot(geom=self.p, instance=self.instance)
         self.plot.save_with_user(self.commander_user)
 
@@ -128,6 +138,23 @@ class ScalarUDFFilterTest(OTMTestCase):
         self.assertEqual(
             self.choice_b,
             {plot.pk for plot in plots})
+
+    def test_filter_on_multichoice_value_works(self):
+        plot = Plot(geom=self.p, instance=self.instance)
+        plot.udfs['Test multichoice'] = 'a'
+        plot.save_with_user(self.commander_user)
+
+        plot = Plot(geom=self.p, instance=self.instance)
+        plot.udfs['Test multichoice'] = 'contains a'
+        plot.save_with_user(self.commander_user)
+
+        plot = Plot(geom=self.p, instance=self.instance)
+        plot.udfs['Test multichoice'] = 'also does'
+        plot.save_with_user(self.commander_user)
+
+        plots_with_a = Plot.objects.filter(
+            **{'hstore_udfs__Test multichoice__contains': 'a'})
+        self.assertEqual(plots_with_a.count(), 1)
 
     def test_combine_with_geom(self):
         plot_a = Plot.objects.get(pk=self.choice_a.pop())
@@ -243,7 +270,6 @@ class ScalarUDFFilterTest(OTMTestCase):
                                        'hstore_udfs__Test int__int__lte': 50})
         self.assertEqual(len(plots), 2)
 
-    @skip('Implement when the integer test works')
     def test_float_gt_and_lte_constraints(self):
         '''
         The straightforward test

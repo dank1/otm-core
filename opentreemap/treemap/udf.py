@@ -424,32 +424,35 @@ class UserDefinedFieldDefinition(models.Model):
     def _update_choice_scalar(self, old_choice_value, new_choice_value):
         Model = safe_get_udf_model_class(self.model_type)
 
+        datatype = self._validate_and_update_choice(
+            copy.deepcopy(self.datatype_dict),
+            old_choice_value, new_choice_value)
+
         if self.datatype_dict['type'] == 'choice':
             udf_filter = {'instance': self.instance,
                           self.lookup_name: old_choice_value}
             models = Model.objects.filter(**udf_filter)
-
             for model in models:
-                model.udfs[self.name] = new_choice_value
+                model.udfs.__setitem__(self.name, new_choice_value,
+                                       dtd=datatype)
                 model.save_base()
 
-        else:  # multichoice
+        else:  # 'multichoice'
             udf_filter = {'instance': self.instance,
                           self.lookup_name + '__contains': old_choice_value}
             models = Model.objects.filter(**udf_filter)
-
             for model in models:
                 newval = self._list_replace_or_remove(
                     model.udfs[self.name],
                     old_choice_value,
                     new_choice_value)
-                model.udfs[self.name] = newval
+                model.udfs.__setitem__(self.name, newval, dtd=datatype)
                 model.save_base()
 
-        datatype = self._validate_and_update_choice(
-            self.datatype_dict, old_choice_value, new_choice_value)
-
+        self.datatype_dict.update(datatype)
         self.datatype = json.dumps(datatype)
+        # Save before updating the models, so model validity checking
+        # succeeds
         self.save()
 
         audits = Audit.objects.filter(
@@ -819,8 +822,11 @@ class UserDefinedFieldDefinition(models.Model):
 
         return datatypes
 
-    def reverse_clean(self, value):
-        datatype = self.datatype_dict['type']
+    def reverse_clean(self, value, key=None, datatype_dict=None):
+        dtd = datatype_dict or self.datatype_dict
+        dtd = dtd if key is None else self.datatype_by_field[key]
+        datatype = dtd['type']
+
         if datatype == 'date':
             if isinstance(value, six.string_types):
                 return value
@@ -1187,7 +1193,7 @@ class UDFModel(UserTrackable, models.Model):
                 except KeyError:
                     return None
 
-        def __setitem__(self, key, val):
+        def __setitem__(self, key, val, dtd=None):
             self._update_instance_properties()
 
             udf = self._get_udf_or_error(key)
@@ -1199,8 +1205,8 @@ class UDFModel(UserTrackable, models.Model):
                 # again, in order to go through this entrypoint.
                 self.collection_fields[key] = copy.deepcopy(val)
             else:
-                cleaned_value = udf.clean_value(val)
-                hstore_value = udf.reverse_clean(val)
+                cleaned_value = udf.clean_value(val, datatype_dict=dtd)
+                hstore_value = udf.reverse_clean(val, datatype_dict=dtd)
 
                 super(UDFModel.UdfsProxy, self).__setitem__(key, cleaned_value)
 
@@ -1464,7 +1470,7 @@ class UDFModel(UserTrackable, models.Model):
 
                 if udcv.data != value_dict:
                     udcv.data = {
-                        key: field.reverse_clean(val)
+                        key: field.reverse_clean(val, key=key)
                         for key, val in value_dict.items()}
                     udcv.save_with_user(user)
 
