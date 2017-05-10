@@ -1007,9 +1007,6 @@ class ScalarUDFTest(OTMTestCase):
         self.assertRaises(ValidationError,
                           self._test_datatype, 'Test choice', 'bad choice')
 
-    def test_user_datatype(self):
-        self._test_datatype('Test user', self.commander_user)
-
     def test_date_datatype(self):
         d = datetime.now().replace(microsecond=0)
 
@@ -1017,14 +1014,6 @@ class ScalarUDFTest(OTMTestCase):
 
     def test_string_datatype(self):
         self._test_datatype('Test string', 'Sweet Plot')
-
-    def test_user_validation_invalid_id(self):
-        self.assertRaises(ValidationError,
-                          self._test_datatype, 'Test user', 349949)
-
-    def test_user_validation_non_integer(self):
-        self.assertRaises(ValidationError,
-                          self._test_datatype, 'Test user', 'zztop')
 
     def test_in_operator(self):
         self.assertEqual('Test string' in self.plot.udfs,

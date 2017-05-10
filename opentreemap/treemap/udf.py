@@ -433,8 +433,11 @@ class UserDefinedFieldDefinition(models.Model):
                           self.lookup_name: old_choice_value}
             models = Model.objects.filter(**udf_filter)
             for model in models:
-                model.udfs.__setitem__(self.name, new_choice_value,
-                                       dtd=datatype)
+                if new_choice_value is None:
+                    model.udfs.__delitem__(self.name)
+                else:
+                    model.udfs.__setitem__(self.name, new_choice_value,
+                                           dtd=datatype)
                 model.save_base()
 
         else:  # 'multichoice'
@@ -446,7 +449,10 @@ class UserDefinedFieldDefinition(models.Model):
                     model.udfs[self.name],
                     old_choice_value,
                     new_choice_value)
-                model.udfs.__setitem__(self.name, newval, dtd=datatype)
+                if newval is None:
+                    model.udfs.__delitem__(self.name)
+                else:
+                    model.udfs.__setitem__(self.name, newval, dtd=datatype)
                 model.save_base()
 
         self.datatype_dict.update(datatype)
@@ -1195,7 +1201,6 @@ class UDFModel(UserTrackable, models.Model):
 
         def __setitem__(self, key, val, dtd=None):
             self._update_instance_properties()
-
             udf = self._get_udf_or_error(key)
 
             if udf.iscollection:
@@ -1215,6 +1220,20 @@ class UDFModel(UserTrackable, models.Model):
                     hstore_attr = {}
                     setattr(self.instance, self._field_name, hstore_attr)
                 hstore_attr[key] = hstore_value
+
+        def __delitem__(self, key):
+            self._update_instance_properties()
+            udf = self._get_udf_or_error(key)
+
+            if udf.iscollection:
+                self.instance.dirty_collection_udfs.add(key)
+                del self.collection_fields[key]
+            else:
+                super(UDFModel.UdfsProxy, self).__delitem__(key)
+
+                hstore_attr = getattr(self.instance, self._field_name)
+                if isinstance(hstore_attr, dict):
+                    del hstore_attr[key]
 
         # The automated tests require filling in all the collection methods
 
