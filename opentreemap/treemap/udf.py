@@ -1052,7 +1052,9 @@ class UDFModel(UserTrackable, models.Model):
     hstore_udfs = UDFField(
         db_index=True,
         blank=True,
-        default={},
+        # Return a different empty dict each time.
+        # Otherwise, all new UDFModels will share the same dict!
+        default=lambda: {},
         db_column='udfs')
 
     class Meta:

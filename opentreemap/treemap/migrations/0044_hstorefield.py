@@ -21,7 +21,8 @@ class Migration(migrations.Migration):
             model_name='mapfeature',
             name='hstore_udfs',
             field=django.contrib.postgres.fields.hstore.HStoreField(
-                default={}, db_index=True, db_column='udfs', blank=True),
+                default=lambda: {},
+                db_index=True, db_column='udfs', blank=True),
         ),
         migrations.RenameField(
             model_name='tree',
@@ -32,7 +33,8 @@ class Migration(migrations.Migration):
             model_name='tree',
             name='hstore_udfs',
             field=django.contrib.postgres.fields.hstore.HStoreField(
-                default={}, db_index=True, db_column='udfs', blank=True),
+                default=lambda: {},
+                db_index=True, db_column='udfs', blank=True),
         ),
         migrations.AlterField(
             model_name='userdefinedcollectionvalue',
