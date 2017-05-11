@@ -116,6 +116,21 @@ def safe_get_udf_model_class(model_string):
     return model_class
 
 
+def _get_user_defined_fields_from_dict(model_dict):
+    model_name = model_dict.get('_model_name', '')
+    feature_type = model_dict.get('feature_type', model_name)
+
+    if 'instance' in model_dict:
+        return udf_defs(model_dict['instance'], feature_type)
+    # Might just not be initialized yet...
+    elif 'instance_id' in model_dict and \
+            model_dict.get('instance_id', None) is not None:
+        instance = Instance.objects.get(pk=model_dict['instance_id'])
+        return udf_defs(instance, feature_type)
+    else:
+        return []
+
+
 class UserDefinedCollectionValue(UserTrackable, models.Model):
     """
     UserDefinedCollectionValue does not inherit either the authorizable
@@ -1292,26 +1307,15 @@ class UDFModel(UserTrackable, models.Model):
 
     def get_user_defined_fields(self):
         # self might not be fully initialized yet. Beware of __getattr__.
-
-        model_name = self.__dict__.get('_model_name', '')
-        feature_type = self.__dict__.get('feature_type', model_name)
-
-        if hasattr(self, 'instance'):
-            return udf_defs(self.instance, feature_type)
-        # Might just not be initialized yet...
-        elif hasattr(self, 'instance_id') and \
-                self.__dict__.get('instance_id', None) is not None:
-            instance = Instance.objects.get(pk=self.instance_id)
-            return udf_defs(instance, feature_type)
-        else:
-            return []
+        return _get_user_defined_fields_from_dict(self.__dict__)
 
     def __getattr__(self, attr):
         attrname = attr.replace('udf:', '')
-        udfs = self.get_user_defined_fields()
-        for udfd in udfs:
+        udfds = _get_user_defined_fields_from_dict(self.__dict__)
+        self_udfs = self.__dict__.get('udfs', {})
+        for udfd in udfds:
             if attrname == udfd.name:
-                return self.udfs.get(attrname, None)
+                return self_udfs.get(attrname, None)
 
         raise AttributeError(attr)
 

@@ -1461,3 +1461,7 @@ class ITreeCodeOverride(models.Model, Auditable):
 
     class Meta:
         unique_together = ('instance_species', 'region',)
+
+    def __init__(self, *args, **kwargs):
+        super(ITreeCodeOverride, self).__init__(*args, **kwargs)
+        self.populate_previous_state()
