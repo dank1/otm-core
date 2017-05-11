@@ -91,8 +91,6 @@ class TreeImportRow(GenericImportRow):
         'geom': fields.trees.POINT,
         'width': fields.trees.PLOT_WIDTH,
         'length': fields.trees.PLOT_LENGTH,
-        # TODO: READONLY restore when implemented
-        # 'readonly': fields.trees.READ_ONLY,
         'owner_orig_id': fields.trees.EXTERNAL_ID_NUMBER,
         'address_street': fields.trees.STREET_ADDRESS,
         'address_city': fields.trees.CITY_ADDRESS,
@@ -106,8 +104,6 @@ class TreeImportRow(GenericImportRow):
         'species': fields.trees.SPECIES_OBJECT,
         'date_planted': fields.trees.DATE_PLANTED,
         'date_removed': fields.trees.DATE_REMOVED,
-        # TODO: READONLY restore when implemented
-        # 'readonly': fields.trees.READ_ONLY
     }
 
     # plot that was created from this row
@@ -236,7 +232,8 @@ class TreeImportRow(GenericImportRow):
         for udf_def in tree_udf_defs:
             udf_column_name = ie.get_udf_column_name(udf_def)
             value = data.get(udf_column_name, None)
-            if value:
+            # Legitimate values could be falsey
+            if value is not None:
                 tree_edited = True
                 if tree is None:
                     tree = Tree(instance=plot.instance)

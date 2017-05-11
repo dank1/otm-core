@@ -1344,11 +1344,6 @@ class TreeIntegrationTests(IntegrationTests):
 
         self.assertEqual(tree2.species.pk, s1_gsc.pk)
 
-        # TODO: READONLY restore when implemented
-        # csv = """
-        # | point x | point y | date planted | read only |
-        # | 25.00   | 25.00   | 2012-02-03   | true      |
-        # """
         csv = """
         | point x | point y | date planted |
         | 25.00   | 25.00   | 2012-02-03   |
@@ -1361,8 +1356,6 @@ class TreeIntegrationTests(IntegrationTests):
         dateplanted = date(2012, 2, 3)
 
         self.assertEqual(tree.date_planted, dateplanted)
-        # TODO: READONLY restore when implemented
-        # self.assertEqual(tree.readonly, True)
 
         psycopg2.extras.register_hstore(connection.cursor(), globally=True)
 
