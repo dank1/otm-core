@@ -117,18 +117,17 @@ def safe_get_udf_model_class(model_string):
 
 
 def _get_user_defined_fields_from_dict(model_dict):
-    model_name = model_dict.get('_model_name', '')
-    feature_type = model_dict.get('feature_type', model_name)
+    model_name = model_dict.get('_udf_model_type', '')
+    instance = model_dict.get('instance', None)
+    if instance is None:
+        instance_id = model_dict.get('instance_id', None)
+        if instance_id is not None:
+            instance = Instance.objects.get(pk=model_dict['instance_id'])
 
-    if 'instance' in model_dict:
-        return udf_defs(model_dict['instance'], feature_type)
-    # Might just not be initialized yet...
-    elif 'instance_id' in model_dict and \
-            model_dict.get('instance_id', None) is not None:
-        instance = Instance.objects.get(pk=model_dict['instance_id'])
-        return udf_defs(instance, feature_type)
-    else:
+    if instance is None:
         return []
+
+    return udf_defs(instance, model_name)
 
 
 class UserDefinedCollectionValue(UserTrackable, models.Model):
@@ -1267,6 +1266,8 @@ class UDFModel(UserTrackable, models.Model):
             return [v for v in self.itervalues()]
 
     def __init__(self, *args, **kwargs):
+        self._setup_udf_model_type()
+
         # Model doesn't know anything about `'udfs'`,
         # so take it out before `super`.
         udfs_kwarg = kwargs.pop('udfs', {})
@@ -1289,6 +1290,17 @@ class UDFModel(UserTrackable, models.Model):
         # otherwise complete.
 
         self.dirty_collection_udfs = set()
+
+    def _setup_udf_model_type(self):
+        '''
+        Model type used in searching for UserDefinedFieldDefinition objects
+        related to self.
+
+        Cache it in self.__dict__ for use by __getattr__, to avoid
+        infinite recursion.
+        '''
+        self._udf_model_type = getattr(self, 'feature_type',
+                                       self.__class__.__name__)
 
     def _setup_udfs(self, udfs={}, hstore_udfs={}):
         hstore_udfs_kwarg = copy.deepcopy(hstore_udfs)
