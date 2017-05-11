@@ -197,15 +197,29 @@ def _parse_query_dict(query_dict, mapping):
 
 def _parse_scalar_predicate(query, mapping):
 
-    parse_dict_value = partial(_parse_dict_value_for_mapping, PREDICATE_TYPES)
+    parse_dict_props = partial(_parse_dict_props_for_mapping, PREDICATE_TYPES)
 
     def parse_scalar_predicate_pair(key, value, mapping):
         model, prefix, search_key = _parse_predicate_key(key, mapping)
 
-        query = {_lookup_key(prefix, search_key, k): v for (k, v)
-                 in parse_dict_value(value).iteritems()} \
-            if isinstance(value, dict) \
-            else {prefix + search_key: value}
+        if not isinstance(value, dict):
+            query = {prefix + search_key: value}
+        else:
+            props_by_pred = parse_dict_props(value)
+
+            query = {}
+
+            for pred, props in props_by_pred.iteritems():
+
+                lookup_tail, rhs = _parse_prop(props, value, pred, value[pred])
+
+                cast = rhs if props['udf_cast'] else None
+
+                lookup_key = _lookup_key(
+                    prefix, search_key,
+                    lookup_name=lookup_tail, cast=cast)
+
+                query[lookup_key] = rhs
 
         return FilterContext(basekey=model, **query)
 
@@ -316,17 +330,24 @@ def _parse_udf_collection(udfd_id, query_parts):
                            for part in query_parts])))
 
 
-def _lookup_key(prefix, field, lookup_name=''):
+def _lookup_key(prefix, field, lookup_name='', cast=None):
     '''
     given a string prefix such as 'tree__' or 'data__',
     a custom field name such as 'Action', 'Date', or 'udf:Root Depth',
-    and an optional lookup_name such as '__lt' or '__contains',
+    an optional lookup_name such as '__lt' or '__contains',
+    and an optional cast such as '__float',
 
     return a string lookup key.
     '''
     if _is_udf(field):
         field = _lookup_key('hstore_udfs__', field[4:])
-    return '{}{}{}'.format(prefix, field, lookup_name)
+        if isinstance(cast, float):
+            cast = '__float'
+        else:
+            cast = ''
+    else:
+        cast = ''
+    return '{}{}{}{}'.format(prefix, field, cast, lookup_name)
 
 
 def _parse_predicate_key(key, mapping):
@@ -458,30 +479,37 @@ def _hstore_exact_predicate(val):
 PREDICATE_TYPES = {
     'MIN': {
         'combines_with': {'MAX'},
+        'udf_cast': True,
         'predicate_builder': _parse_min_max_value_fn('__gt'),
     },
     'MAX': {
         'combines_with': {'MIN'},
+        'udf_cast': True,
         'predicate_builder': _parse_min_max_value_fn('__lt'),
     },
     'IN': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _simple_pred('__in'),
     },
     'IS': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _simple_pred('')
     },
     'LIKE': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _simple_pred('__icontains')
     },
     'ISNULL': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _simple_pred('__isnull')
     },
     'IN_BOUNDARY': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _parse_in_boundary
     }
 }
@@ -490,14 +518,17 @@ PREDICATE_TYPES = {
 COLLECTION_HSTORE_PREDICATE_TYPES = {
     'MIN': {
         'combines_with': {'MAX'},
+        'udf_cast': False,
         'predicate_builder': _parse_min_max_value_fn('__gt', is_hstore=True),
     },
     'MAX': {
         'combines_with': {'MIN'},
+        'udf_cast': False,
         'predicate_builder': _parse_min_max_value_fn('__lt', is_hstore=True),
     },
     'IS': {
         'combines_with': set(),
+        'udf_cast': False,
         'predicate_builder': _hstore_exact_predicate,
     },
 }
@@ -518,25 +549,47 @@ def _parse_dict_value_for_mapping(mapping, valuesdict):
     All predicates except MIN/MAX are mutually exclusive
     """
 
+    props = _parse_dict_props_for_mapping(mapping, valuesdict)
+
+    return _parse_props(props, valuesdict)
+
+
+def _parse_props(props, valuesdict):
+
     params = {}
+
+    for key, val in valuesdict.items():
+        lookup, rhs = _parse_prop(props[key], valuesdict, key, val)
+        params[lookup] = rhs
+
+    return params
+
+
+def _parse_prop(predicate_props, valuesdict, key, val):
+        valid_values = predicate_props['combines_with'].union({key})
+        if not valid_values.issuperset(set(valuesdict.keys())):
+            raise ParseException(
+                'Cannot use these keys together: %s vs %s' %
+                (valuesdict.keys(), valid_values))
+
+        predicate_builder = predicate_props['predicate_builder']
+        param_pair = predicate_builder(val)
+        # Return a 2-tuple rather than a single-key dict
+        return param_pair.items()[0]
+
+
+def _parse_dict_props_for_mapping(mapping, valuesdict):
+
+    props = {}
 
     for value_key in valuesdict:
         if value_key not in mapping:
             raise ParseException(
                 'Invalid key: %s in %s' % (value_key, valuesdict))
         else:
-            predicate_props = mapping[value_key]
-            valid_values = predicate_props['combines_with'].union({value_key})
-            if not valid_values.issuperset(set(valuesdict.keys())):
-                raise ParseException(
-                    'Cannot use these keys together: %s in %s' %
-                    (valuesdict.keys(), valuesdict))
-            else:
-                predicate_builder = predicate_props['predicate_builder']
-                param_pair = predicate_builder(valuesdict[value_key])
-                params.update(param_pair)
+            props[value_key] = mapping[value_key]
 
-    return params
+    return props
 
 
 def _apply_combinator(combinator, predicates):

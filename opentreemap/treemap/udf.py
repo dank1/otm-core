@@ -1100,16 +1100,11 @@ class UDFModel(UserTrackable, models.Model):
             self.instance = obj
             self._name = this_field_name
             self._field_name = hstore_field_name
-            self._model_type = getattr(obj, 'feature_type',
-                                       obj.__class__.__name__) or \
-                obj.__class__.__name__
 
             self._collection_fields = None
             if 0 < len(kwargs):
                 for k, v in kwargs.iteritems():
                     self[k] = v
-
-            self._update_instance_properties()
 
         @property
         def collection_data_loaded(self):
@@ -1158,26 +1153,8 @@ class UDFModel(UserTrackable, models.Model):
                 if field.name == key:
                     return field
 
-            raise KeyError("Couldn't find UDF for field '%s'" % key)
-
-        def _make_instance_property(self, key):
-            def get_key(instance):
-                return self.get(key, None)
-
-            def set_key(instance, value):
-                self[key] = value
-
-            return property(get_key, set_key)
-
-        def _add_property_to_instance(self, key):
-            setattr(self.instance, self._prefixed_name(key),
-                    self._make_instance_property(key))
-
-        def _update_instance_properties(self):
-            for udfd in self.instance.get_user_defined_fields():
-                key = udfd.name
-                if not hasattr(self.instance, self._prefixed_name(key)):
-                    self._add_property_to_instance(key)
+            raise KeyError("Couldn't find UDF for field '{}' in [{}]".format(
+                key, ', '.join([field.name for field in udfs])))
 
         def _prefixed_name(self, key):
             return 'udf:' + key
@@ -1187,7 +1164,6 @@ class UDFModel(UserTrackable, models.Model):
                            in self.instance.get_user_defined_fields()]
 
         def __getitem__(self, key):
-            self._update_instance_properties()
             udf = self._get_udf_or_error(key)
 
             if udf.iscollection:
@@ -1200,7 +1176,6 @@ class UDFModel(UserTrackable, models.Model):
                     return None
 
         def __setitem__(self, key, val, dtd=None):
-            self._update_instance_properties()
             udf = self._get_udf_or_error(key)
 
             if udf.iscollection:
@@ -1222,7 +1197,6 @@ class UDFModel(UserTrackable, models.Model):
                 hstore_attr[key] = hstore_value
 
         def __delitem__(self, key):
-            self._update_instance_properties()
             udf = self._get_udf_or_error(key)
 
             if udf.iscollection:
@@ -1317,11 +1291,29 @@ class UDFModel(UserTrackable, models.Model):
         return normal_fields or self.dirty_collection_udfs
 
     def get_user_defined_fields(self):
+        # self might not be fully initialized yet. Beware of __getattr__.
+
+        model_name = self.__dict__.get('_model_name', '')
+        feature_type = self.__dict__.get('feature_type', model_name)
+
         if hasattr(self, 'instance'):
-            return udf_defs(self.instance,
-                            getattr(self, 'feature_type', self._model_name))
+            return udf_defs(self.instance, feature_type)
+        # Might just not be initialized yet...
+        elif hasattr(self, 'instance_id') and \
+                self.__dict__.get('instance_id', None) is not None:
+            instance = Instance.objects.get(pk=self.instance_id)
+            return udf_defs(instance, feature_type)
         else:
             return []
+
+    def __getattr__(self, attr):
+        attrname = attr.replace('udf:', '')
+        udfs = self.get_user_defined_fields()
+        for udfd in udfs:
+            if attrname == udfd.name:
+                return self.udfs.get(attrname, None)
+
+        raise AttributeError(attr)
 
     def audits(self):
         regular_audits = Q(model=self._model_name,

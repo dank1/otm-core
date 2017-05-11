@@ -49,7 +49,7 @@ def make_collection_udf(instance, name='Stewardship', model='Plot',
         name=name)
 
 
-class ScalarUDFFilterTest(OTMTestCase):
+class ScalarUDFTestCase(OTMTestCase):
     def setUp(self):
         psycopg2.extras.register_hstore(connection.cursor(), globally=True)
 
@@ -112,6 +112,20 @@ class ScalarUDFFilterTest(OTMTestCase):
 
         self.plot = Plot(geom=self.p, instance=self.instance)
         self.plot.save_with_user(self.commander_user)
+
+
+class ScalarUDFAccessTest(ScalarUDFTestCase):
+    def test_set_get_int(self):
+        self.plot.udfs['Test int'] = 3
+        self.plot.save_with_user(self.commander_user)
+        self.plot.refresh_from_db()
+        self.assertEqual(self.plot.udfs['Test int'], 3)
+        self.assertEqual(getattr(self.plot, 'udf:Test int', None), 3)
+
+
+class ScalarUDFFilterTest(ScalarUDFTestCase):
+    def setUp(self):
+        super(ScalarUDFFilterTest, self).setUp()
 
         def create_and_save_with_choice(c, n=1):
             plots = []
