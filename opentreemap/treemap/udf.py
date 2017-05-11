@@ -1270,13 +1270,13 @@ class UDFModel(UserTrackable, models.Model):
             return [v for v in self.itervalues()]
 
     def __init__(self, *args, **kwargs):
-        self._setup_udf_model_type()
-
         # Model doesn't know anything about `'udfs'`,
         # so take it out before `super`.
         udfs_kwarg = kwargs.pop('udfs', {})
 
         super(UDFModel, self).__init__(*args, **kwargs)
+
+        self._setup_udf_model_type()
 
         hstore_udfs_kwarg = copy.deepcopy(getattr(self, 'hstore_udfs', {}))
         self._setup_udfs(udfs_kwarg, hstore_udfs_kwarg)
@@ -1303,8 +1303,9 @@ class UDFModel(UserTrackable, models.Model):
         Cache it in self.__dict__ for use by __getattr__, to avoid
         infinite recursion.
         '''
+        classname = type(self).__name__
         self._udf_model_type = getattr(self, 'feature_type',
-                                       self.__class__.__name__)
+                                       classname) or classname
 
     def _setup_udfs(self, udfs={}, hstore_udfs={}):
         hstore_udfs_kwarg = copy.deepcopy(hstore_udfs)

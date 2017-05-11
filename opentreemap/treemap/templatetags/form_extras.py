@@ -353,7 +353,7 @@ class AbstractNode(template.Node):
             if field_name in model._meta.get_all_field_names():
                 try:
                     val = getattr(model, field_name)
-                except ObjectDoesNotExist:
+                except (ObjectDoesNotExist, AttributeError):
                     pass
             elif _is_udf(model, udf_field_name):
                 if udf_field_name in model.udfs:
