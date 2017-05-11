@@ -64,7 +64,9 @@ def dict_to_model(config, model_name, data_dict, instance):
             pass
         # instance *must* be set during initialization
         model = ModelClass() \
-            if instance_field is None \
+            if instance_field is None or \
+            instance_field.many_to_many or \
+            instance_field.one_to_many \
             else ModelClass(instance=instance)
 
     for field in (common_fields
