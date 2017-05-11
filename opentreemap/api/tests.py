@@ -1072,7 +1072,7 @@ class UpdatePlotAndTree(OTMTestCase):
     def test_update_multichoice_v3(self):
         self._create_multichoice()
         test_plot = mkPlot(self.instance, self.user)
-        test_plot.udfs['multi'] = None
+        test_plot.udfs['multi'] = []
         test_plot.save_with_user(self.user)
 
         updated_values = {'plot': {

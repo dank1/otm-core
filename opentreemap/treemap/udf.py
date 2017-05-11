@@ -890,14 +890,18 @@ class UserDefinedFieldDefinition(models.Model):
         if datatype_dict is None:
             datatype_dict = self.datatype_dict
 
+        def complaint(template, **kwargs):
+            msg = _(template) % kwargs
+            key = '{}.udf:{}'.format(self.model_type.lower(), self.name)
+            return ValidationError({key: msg})
+
         datatype = datatype_dict['type']
         if datatype == 'float':
             try:
                 return float(value)
             except ValueError:
-                raise ValidationError(_('%(fieldname)s '
-                                        'must be a real number') %
-                                      {'fieldname': self.name})
+                raise complaint('%(fieldname)s must be a real number',
+                                fieldname=self.name)
         elif datatype == 'int':
             try:
                 if float(value) != int(value):
@@ -905,8 +909,8 @@ class UserDefinedFieldDefinition(models.Model):
 
                 return int(value)
             except ValueError:
-                raise ValidationError(_('%(fieldname)s must be an integer') %
-                                      {'fieldname': self.name})
+                raise complaint('%(fieldname)s must be an integer',
+                                fieldname=self.name)
         elif datatype == 'date':
             if isinstance(value, (date, datetime)):
                 return value
@@ -914,25 +918,25 @@ class UserDefinedFieldDefinition(models.Model):
             try:
                 valid_date = parse_date_string_with_or_without_time(value)
             except ValueError:
-                raise ValidationError(_('%(fieldname)s must be formatted as '
-                                        'YYYY-MM-DD') %
-                                      {'fieldname': self.name})
+                raise complaint(('%(fieldname)s must be formatted as '
+                                 'YYYY-MM-DD'),
+                                fieldname=self.name)
 
             # Ensure date UDF values contain a year >= 1900 so that
             # date formatting with `strftime` will work correctly.
             if valid_date.year < 1900:
-                raise ValidationError(_('%(fieldname)s year must be >= 1900')
-                                      % {'fieldname': self.name})
+                raise complaint('%(fieldname)s year must be >= 1900',
+                                fieldname=self.name)
 
             return valid_date
 
         elif 'choices' in datatype_dict:
             def _validate(val):
                 if val not in datatype_dict['choices']:
-                    raise ValidationError(
-                        _('Invalid choice (%(given)s). Expecting %(allowed)s')
-                        % {'given': val,
-                           'allowed': ', '.join(datatype_dict['choices'])})
+                    raise complaint(
+                        'Invalid choice (%(given)s). Expecting %(allowed)s',
+                        given=val,
+                        allowed=', '.join(datatype_dict['choices']))
 
             if datatype == 'choice':
                 _validate(value)
@@ -944,9 +948,9 @@ class UserDefinedFieldDefinition(models.Model):
                     else:
                         values = json.loads(value)
                 except ValueError:
-                    raise ValidationError(
-                        _('%(fieldname)s must be valid JSON') %
-                        {'fieldname': self.name})
+                    raise complaint(
+                        '%(fieldname)s must be valid JSON',
+                        fieldname=self.name)
                 if isinstance(values, basestring):
                     # A single string is valid JSON. Wrap as a list for
                     # consistency
