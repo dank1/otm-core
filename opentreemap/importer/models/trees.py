@@ -413,8 +413,12 @@ class TreeImportRow(GenericImportRow):
                     udf_def.clean_value(value)
                     self.cleaned[column_name] = value
                 except ValidationError as ve:
+                    message = str(ve)
+                    if isinstance(ve.message_dict, dict):
+                        message = '\n'.join(
+                            [unicode(m) for m in ve.message_dict.values()])
                     self.append_error(
-                        errors.INVALID_UDF_VALUE, column_name, str(ve))
+                        errors.INVALID_UDF_VALUE, column_name, message)
 
     def validate_row(self):
         """
